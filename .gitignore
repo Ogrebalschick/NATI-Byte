@@ -1,56 +1,102 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
-node_modules/
+# ===== Общее =====
 
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
-
-# Native
-.kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-.pnpm-debug.log*
-
-# OS & Environment
-.DS_Store
-Thumbs.db
-*.pem
-
-# Environment & API secrets (ВАЖНО для ключей)
-.env
-.env.*
-!.env.example
-
-# Editor directories (IDE)
-.idea/
+# IDE
 .vscode/
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-# typescript
-*.tsbuildinfo
+# OS
+.DS_Store
+Thumbs.db
+*.pem
 
-example
+# Logs
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.pnpm-debug.log*
+
+# ===== Frontend =====
+
+# dependencies
+frontend/node_modules/
+
+# Expo
+frontend/.expo/
+frontend/dist/
+frontend/web-build/
+frontend/expo-env.d.ts
+
+# Native
+frontend/.kotlin/
+frontend/*.orig.*
+frontend/*.jks
+frontend/*.p8
+frontend/*.p12
+frontend/*.key
+frontend/*.mobileprovision
+
+# Metro
+frontend/.metro-health-check*
+
+# Environment & API secrets
+frontend/.env
+frontend/.env.*
+frontend/!.env.example
+
+# Editor directories (локальные)
+frontend/.idea/
+frontend/.vscode/
+frontend/*.suo
+frontend/*.ntvs*
+frontend/*.njsproj
+frontend/*.sln
+frontend/*.sw?
+
+# typescript
+frontend/*.tsbuildinfo
+
+frontend/example
 
 # generated native folders
-/ios
-/android
+frontend/ios
+frontend/android
+
+# ===== Backend =====
+
+# Virtual environment
+backend/.venv/
+backend/venv/
+
+# Python cache
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+
+# Database (Chroma)
+backend/chroma_db/
+
+# Environment secrets
+backend/.env
+backend/.env.*
+backend/!.env.example
+
+# IDE (локальные)
+backend/.vscode/
+backend/.idea/
+
+# Logs
+backend/*.log
+
+# ===== Корневые временные папки (на всякий случай) =====
+chroma_db/
+.venv/
+venv/
+__pycache__/

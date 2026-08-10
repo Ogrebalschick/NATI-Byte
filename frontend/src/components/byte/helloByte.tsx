@@ -26,8 +26,8 @@ let HelloByte = () => {
 }
 const styles = StyleSheet.create({
     helloByteWrap: {
-        flex: 1,                   // 👈 Заставляет блок растянуться на всё свободное место над инпутом
-        justifyContent: 'center',  // 👈 Выравнивает содержимое (картинку и текст) по вертикали по центру
+        flex: 1,       
+        justifyContent: 'center',
         alignItems: 'center'
     },
     helloByte: {

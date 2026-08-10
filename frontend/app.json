@@ -18,7 +18,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png",
         "softwareKeyboardLayoutMode": "resize"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "usesCleartextTraffic": true
     },
     "web": {
       "output": "static",

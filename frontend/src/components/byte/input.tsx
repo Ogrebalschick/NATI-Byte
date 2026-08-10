@@ -4,6 +4,8 @@ import { Animated, StyleSheet, TextInput, TouchableOpacity } from "react-native"
 
 let Input = (props: any) => {
 
+    const { onSend, disabled } = props;
+
     const [text, setText] = useState('');
 
     const isEntered = text.trim().length > 0;
@@ -12,10 +14,10 @@ let Input = (props: any) => {
     const paddingAnim = useRef(new Animated.Value(16)).current;
 
     const handleSend = () => {
-        if (!isEntered) return;
+        if (!isEntered || disabled) return; 
         props.onSend(text.trim());
         setText('');
-    }
+    };
 
     useEffect(() => {
         Animated.parallel([
@@ -56,7 +58,7 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         textAlignVertical: 'top',
-        maxHeight: 150, // 💡 Ограничиваем максимальную высоту multiline, чтобы он не улетал за экран
+        maxHeight: 150, 
     },
         controlPanel: {
         position: 'absolute',
