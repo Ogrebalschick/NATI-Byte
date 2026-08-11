@@ -3,6 +3,7 @@ import Input from '@/components/byte/input';
 import Messages from '@/components/byte/messages';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
+import { TouchableOpacity, Text } from 'react-native'
 import {
     Keyboard,
     KeyboardAvoidingView,
@@ -70,7 +71,20 @@ let Byte = () => {
             setLoading(false);
         }
     };
+    // Добавьте эту функцию внутрь компонента Byte (выше return)
+    const generateTestMessages = () => {
+        const longText = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. ".repeat(3); // длинный текст
 
+        const testMessages: Message[] = [];
+        for (let i = 0; i < 20; i++) {
+            testMessages.push({
+                id: Date.now() + i,
+                who: i % 2 === 0 ? 'user' : 'agent',
+                message: `Сообщение #${i + 1}: ${longText.substring(0, 100 + i * 10)}`,
+            });
+        }
+        setMessages(testMessages);
+    };
     return (
         <ScreenWrapper>
             <KeyboardAvoidingView
@@ -78,25 +92,37 @@ let Byte = () => {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
-                <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                    <View style={styles.innerContainer}>
-                        {messages.length > 0 ? (
-                            <Messages messages={messages} />
-                        ) : (
+                <View style={styles.innerContainer}>
+                    {messages.length > 0 ? (
+                        <Messages messages={messages} />
+                    ) : (
+                        <View style={styles.helloWrapper}>
                             <HelloByte />
-                        )}
-                        <View style={styles.bottomSection}>
-                            {loading && (
-                                <ActivityIndicator
-                                    size="small"
-                                    color="#007AFF"
-                                    style={{ marginBottom: 8 }}
-                                />
-                            )}
-                            <Input onSend={handleSend} disabled={loading} />
+                            {/* Временная кнопка для теста (потом удалить) */}
+                            <TouchableOpacity
+                                style={{
+                                    backgroundColor: 'rgba(255,255,255,0.15)',
+                                    padding: 10,
+                                    borderRadius: 8,
+                                    marginHorizontal: 16,
+                                    marginBottom: 8,
+                                }}
+                                onPress={generateTestMessages}
+                            >
+                                <Text style={{ color: '#fff', textAlign: 'center' }}>
+                                    📋 Загрузить тестовые сообщения
+                                </Text>
+                            </TouchableOpacity>
                         </View>
+                    )}
+
+
+                    <View>{/* Пустышка, чтобы input был прижат к низу */}</View>
+                    <View style={styles.bottomSection}>
+                        {loading && <ActivityIndicator size="small" color="#007AFF" style={{ marginBottom: 8 }} />}
+                        <Input onSend={handleSend} disabled={loading} />
                     </View>
-                </TouchableWithoutFeedback>
+                </View>
             </KeyboardAvoidingView>
         </ScreenWrapper>
     );
@@ -112,6 +138,11 @@ const styles = StyleSheet.create({
     },
     bottomSection: {
         paddingBottom: 10,
+    },
+    helloWrapper: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
 });
 

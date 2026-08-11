@@ -1,28 +1,47 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import { FlatList, StyleSheet, Text, View } from "react-native";
+
 let Messages = (props: any) => {
+    const flatListRef = useRef<FlatList>(null);
+
+    useEffect(() => {
+        if (props.messages.length > 0) {
+            flatListRef.current?.scrollToEnd({ animated: true });
+        }
+    }, [props.messages]);
+
     return (
         <View style={styles.contentArea}>
             <FlatList
+                ref={flatListRef}
                 data={props.messages}
-                keyExtractor={(item) => item.id.toString()} contentContainerStyle={styles.contentAreaInner}
+                keyExtractor={(item) => item.id.toString()}
+                contentContainerStyle={styles.contentAreaInner}
                 renderItem={({ item }) => (
                     <View style={[styles.messageBubble, item.who === 'user' ? styles.userBubble : styles.agentBubble]}>
                         <Text style={styles.messageText}>{item.message}</Text>
                     </View>
                 )}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"      
+                showsVerticalScrollIndicator={true}
             />
         </View>
-    )
-}
+    );
+};
 
 const styles = StyleSheet.create({
     contentArea: {
         flex: 1,
-
+        position:'absolute',
+        bottom:0,
+        height:'100%',
+       
     },
     contentAreaInner: {
         gap: 5,
+         paddingBottom:100,
+         paddingTop:40,
     },
     messageBubble: {
         padding: 10,

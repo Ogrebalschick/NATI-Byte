@@ -1,56 +1,98 @@
-# Welcome to your Expo app 👋
+Инструкция по запуску бэкенда чат-бота «Байт»
+1. Требования
+Python 3.12 или выше (рекомендуется 3.13)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Git (для клонирования репозитория)
 
-## Get started
+Учётная запись GigaChat и API-ключ (получить в личном кабинете)
 
-1. Install dependencies
+2. Клонирование репозитория
+bash
+git clone https://github.com/Ogrebalschick/NATI-Byte.git
+cd NATI-Byte/backend
+3. Настройка виртуального окружения
+Windows (PowerShell):
 
-   ```bash
-   npm install
-   ```
+bash
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+macOS / Linux:
 
-2. Start the app
+bash
+python3 -m venv .venv
+source .venv/bin/activate
+4. Установка зависимостей
+bash
+pip install -r requirements.txt
+5. Настройка переменных окружения
+Создайте файл .env в папке backend/ со следующим содержимым:
 
-   ```bash
-   npx expo start
-   ```
+env
+GIGACHAT_CREDENTIALS=ваш_ключ_здесь
+Ключ можно получить в личном кабинете GigaChat.
+Если вы планируете использовать RAG с эмбеддингами через Hugging Face, добавьте также:
 
-In the output, you'll find options to open the app in a
+env
+HF_TOKEN=hf_ваш_токен
+(опционально, для облачных эмбеддингов)
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+6. Запуск сервера
+bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+--reload – автоматически перезагружает сервер при изменениях кода (только для разработки).
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+--host 0.0.0.0 – позволяет принимать запросы с других устройств (телефон, планшет).
 
-## Get a fresh project
+--port 8000 – порт, на котором работает сервер.
 
-When you're ready, run:
+7. Проверка работы
+Откройте в браузере на компьютере:
 
-```bash
-npm run reset-project
-```
+text
+http://localhost:8000/ask?query=Привет
+Если сервер настроен правильно, вы получите JSON-ответ с полем answer, содержащим ответ GigaChat.
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Для проверки с мобильного устройства (в той же Wi-Fi сети) используйте IP-адрес компьютера:
 
-### Other setup steps
+text
+http://192.168.x.x:8000/ask?query=Привет
+(IP можно узнать командой ipconfig (Windows) или ifconfig (macOS/Linux))
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+8. Устранение неполадок
+Ошибка Network request failed при запросе с телефона
+Убедитесь, что сервер запущен с --host 0.0.0.0.
 
-## Learn more
+Проверьте, что брандмауэр Windows не блокирует порт 8000 (создайте правило для входящих подключений TCP порта 8000).
 
-To learn more about developing your project with Expo, look at the following resources:
+В Android-приложении используйте http://10.0.2.2:8000 для эмулятора или IP-адрес компьютера для реального устройства.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Ошибка No module named ...
+Убедитесь, что все зависимости установлены и виртуальное окружение активировано.
 
-## Join the community
+Ошибка 404 или Payment Required при запросе к GigaChat
+Проверьте правильность ключа в .env.
 
-Join our community of developers creating universal apps.
+Убедитесь, что на счету GigaChat есть средства или пробные кредиты.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+9. Развёртывание на продакшн
+Для публичного доступа используйте:
+
+ngrok – для временного туннеля: ngrok http 8000
+
+Docker – контейнеризация (пример Dockerfile будет добавлен позже)
+
+Облачные платформы – например, Yandex Cloud, Heroku, Railway
+
+10. Полезные ссылки
+Документация GigaChat
+
+LangChain
+
+FastAPI
+
+Автор: команда «Байт»
+Последнее обновление: август 2026
+
+Инструкция по запуску фронтенда чат-бота «Байт»
+1. cd NATI-Byte/frontend
+2. npx expo start

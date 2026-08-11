@@ -11,11 +11,11 @@ interface ScreenWrapperProps extends ViewProps {
 export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({ 
   children, 
   style, 
-  bg = '#17161B', // цвет фона по умолчанию
+  bg = '#17161B',
   ...props 
 }) => {
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: bg }, style]} {...props}>
+    <SafeAreaView edges={['left', 'right']} style={[styles.container, { backgroundColor: bg }, style]} {...props} >
       {children}
     </SafeAreaView>
   );
@@ -23,9 +23,8 @@ export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1, // Растягивается на весь экран
-    paddingHorizontal: 16, // Базовые отступы по бокам
-    paddingTop: 10,
+    flex: 1,
+    paddingHorizontal: 16,
     color:'#fff'
   },
 });
