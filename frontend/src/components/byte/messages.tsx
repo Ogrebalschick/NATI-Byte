@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { FlatList, StyleSheet, Text, View } from "react-native";
+import Markdown from 'react-native-markdown-display';
 
 let Messages = (props: any) => {
     const flatListRef = useRef<FlatList>(null);
@@ -19,7 +20,7 @@ let Messages = (props: any) => {
                 contentContainerStyle={styles.contentAreaInner}
                 renderItem={({ item }) => (
                     <View style={[styles.messageBubble, item.who === 'user' ? styles.userBubble : styles.agentBubble]}>
-                        <Text style={styles.messageText}>{item.message}</Text>
+                        <Markdown style={markdownStyles}>{item.message}</Markdown>
                     </View>
                 )}
                 keyboardShouldPersistTaps="handled"
@@ -32,16 +33,12 @@ let Messages = (props: any) => {
 
 const styles = StyleSheet.create({
     contentArea: {
-        flex: 1,
-        position:'absolute',
-        bottom:0,
-        height:'100%',
-       
+        flex: 1, // занимает всё доступное пространство
     },
     contentAreaInner: {
         gap: 5,
-         paddingBottom:100,
-         paddingTop:40,
+        paddingBottom: 20, // небольшой отступ снизу, чтобы не прилипало
+        paddingTop: 20,
     },
     messageBubble: {
         padding: 10,
@@ -50,8 +47,6 @@ const styles = StyleSheet.create({
         borderWidth: 1,
     },
     userBubble: {
-        padding: 10,
-        // backgroundColor:'#CF9228',
         borderColor: '#CF9228',
         justifyContent: 'flex-end',
         maxWidth: "70%",
@@ -60,7 +55,6 @@ const styles = StyleSheet.create({
         marginLeft: 'auto'
     },
     agentBubble: {
-        // backgroundColor:'#04CD73',
         borderColor: '#04CD73',
         justifyContent: 'flex-end',
         maxWidth: "100%",
@@ -68,10 +62,18 @@ const styles = StyleSheet.create({
         borderStartEndRadius: 0,
         marginRight: 'auto'
     },
-    messageText: {
-        color: '#fff',
-    },
+});
 
-})
+const markdownStyles = {
+    body: {
+        fontSize: 16,
+        color: '#fff',
+        lineHeight: 24,
+    },
+    link: {
+        color: '#0066cc',
+        textDecorationLine: 'underline',
+    },
+};
 
 export default Messages;
