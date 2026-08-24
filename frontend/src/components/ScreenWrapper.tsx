@@ -2,10 +2,9 @@ import React from 'react';
 import { StyleSheet, ViewProps } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Определяем типы для пропсов, чтобы можно было передавать кастомные стили при необходимости
 interface ScreenWrapperProps extends ViewProps {
   children: React.ReactNode;
-  bg?: string; // возможность быстро менять цвет фона
+  bg?: string;
 }
 
 export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({ 
@@ -15,7 +14,11 @@ export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({
   ...props 
 }) => {
   return (
-    <SafeAreaView edges={['left', 'right']} style={[styles.container, { backgroundColor: bg }, style]} {...props} >
+    <SafeAreaView 
+      edges={['left', 'right', 'bottom']} // 👈 добавляем bottom
+      style={[styles.container, { backgroundColor: bg }, style]} 
+      {...props} 
+    >
       {children}
     </SafeAreaView>
   );
@@ -25,6 +28,5 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 16,
-    color:'#fff'
   },
 });
