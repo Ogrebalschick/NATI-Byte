@@ -8,10 +8,10 @@ interface ScreenWrapperProps extends ViewProps {
 }
 
 export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({ 
-  children, 
-  style, 
-  bg = '#17161B',
-  ...props 
+    children, 
+    style, 
+    bg = '#17161B',
+    ...props 
 }) => {
   return (
     <SafeAreaView 

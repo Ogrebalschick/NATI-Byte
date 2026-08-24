@@ -19,7 +19,8 @@
         "softwareKeyboardLayoutMode": "resize"
       },
       "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "package": "com.argonaft.Byte"
     },
     "androidStatusBar": {
       "translucent": true,
