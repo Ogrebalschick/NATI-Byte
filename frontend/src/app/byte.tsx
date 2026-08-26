@@ -10,6 +10,7 @@ import {
   Text,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import HelloByte from '@/components/byte/helloByte';
 import Input from '@/components/byte/input';
@@ -22,53 +23,147 @@ interface Message {
 }
 
 const API_URL = Platform.OS === 'android' ? 'http://192.168.0.179:8000' : 'http://localhost:8000';
+const INPUT_BOTTOM_OFFSET = 10;
 
 const Byte = () => {
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets.bottom;
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [isAtTop, setIsAtTop] = useState(true);
-  const translateY = useRef(new Animated.Value(0)).current;
-  const [inputPaddingBottom, setInputPaddingBottom] = useState(0);
 
+  const translateY = useRef(new Animated.Value(0)).current;
+  const bottomPadding = useRef(new Animated.Value(0)).current;
+
+  const messagesCountRef = useRef(messages.length);
+  const isAtTopRef = useRef(isAtTop);
+
+  // Измерение высоты инпута
+  const [inputHeight, setInputHeight] = useState(70);
+  const onInputLayout = (event: any) => {
+    const { height } = event.nativeEvent.layout;
+    setInputHeight(height);
+  };
+
+  useEffect(() => {
+    messagesCountRef.current = messages.length;
+  }, [messages.length]);
+
+  useEffect(() => {
+    isAtTopRef.current = isAtTop;
+  }, [isAtTop]);
+
+  // Слушатели клавиатуры
   useEffect(() => {
     const showListener = Keyboard.addListener('keyboardDidShow', (e) => {
       const height = e.endCoordinates.height;
       setKeyboardHeight(height);
-      if (isAtTop) {
-        // Вверху – не двигаем контейнер, только поднимаем input
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }).start();
-        setInputPaddingBottom(height + 10);
+      setKeyboardVisible(true);
+
+      const hasMessages = messagesCountRef.current > 0;
+      const atTop = isAtTopRef.current;
+
+      const shouldShift = hasMessages && !atTop;
+
+      if (shouldShift) {
+        Animated.parallel([
+          Animated.timing(translateY, {
+            toValue: -(height + INPUT_BOTTOM_OFFSET),
+            duration: 250,
+            useNativeDriver: true,
+          }),
+          Animated.timing(bottomPadding, {
+            toValue: 0,
+            duration: 250,
+            useNativeDriver: false,
+          }),
+        ]).start();
       } else {
-        // Внизу – сдвигаем контейнер, input поднимается вместе с ним
-        Animated.timing(translateY, {
-          toValue: -(height + 10),
-          duration: 250,
-          useNativeDriver: true,
-        }).start();
-        setInputPaddingBottom(0);
+        Animated.parallel([
+          Animated.timing(translateY, {
+            toValue: 0,
+            duration: 250,
+            useNativeDriver: true,
+          }),
+          Animated.timing(bottomPadding, {
+            toValue: hasMessages ? 0 : height + INPUT_BOTTOM_OFFSET,
+            duration: 250,
+            useNativeDriver: false,
+          }),
+        ]).start();
       }
     });
 
     const hideListener = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardHeight(0);
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
-      setInputPaddingBottom(0);
+      setKeyboardVisible(false);
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bottomPadding, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: false,
+        }),
+      ]).start();
     });
 
     return () => {
       showListener.remove();
       hideListener.remove();
     };
-  }, [isAtTop]);
+  }, []);
+
+  // Синхронизация при изменении isAtTop или количества сообщений, если клавиатура открыта
+  useEffect(() => {
+    if (keyboardVisible && keyboardHeight > 0) {
+      const hasMessages = messages.length > 0;
+      const atTop = isAtTop;
+
+      const shouldShift = hasMessages && !atTop;
+
+      if (shouldShift) {
+        Animated.parallel([
+          Animated.timing(translateY, {
+            toValue: -(keyboardHeight + INPUT_BOTTOM_OFFSET),
+            duration: 250,
+            useNativeDriver: true,
+          }),
+          Animated.timing(bottomPadding, {
+            toValue: 0,
+            duration: 250,
+            useNativeDriver: false,
+          }),
+        ]).start();
+      } else {
+        Animated.parallel([
+          Animated.timing(translateY, {
+            toValue: 0,
+            duration: 250,
+            useNativeDriver: true,
+          }),
+          Animated.timing(bottomPadding, {
+            toValue: hasMessages ? 0 : keyboardHeight + INPUT_BOTTOM_OFFSET,
+            duration: 250,
+            useNativeDriver: false,
+          }),
+        ]).start();
+      }
+    }
+  }, [messages.length, isAtTop, keyboardVisible, keyboardHeight]);
+
+  // Обработчик скролла из Messages – игнорируем обновления, если клавиатура видна
+  const handleScrollStateChange = (atTop: boolean) => {
+    if (!keyboardVisible) {
+      setIsAtTop(atTop);
+    }
+  };
 
   const handleSend = async (text: string) => {
     if (!text.trim()) return;
@@ -118,40 +213,62 @@ const Byte = () => {
     setMessages(testMessages);
   };
 
+  // Вычисляем extraBottom для Input
+  const hasMessages = messages.length > 0;
+  const atTop = isAtTop;
+  const keyboardOpen = keyboardVisible;
+
+  let extraBottom = bottomInset; // всегда добавляем отступ от системной панели
+
+  if (!hasMessages && keyboardOpen) {
+    extraBottom += keyboardHeight + INPUT_BOTTOM_OFFSET;
+  } else if (hasMessages && atTop && keyboardOpen) {
+    extraBottom += keyboardHeight + INPUT_BOTTOM_OFFSET;
+  }
+  // иначе только bottomInset
+
+  // Отступ для списка сообщений: высота инпута + extraBottom + небольшой зазор
+  const listBottomOffset = inputHeight + extraBottom + 8;
+
   return (
     <ScreenWrapper>
       <Animated.View style={[styles.container, { transform: [{ translateY }] }]}>
-        <View style={styles.messagesWrapper}>
-          {messages.length > 0 ? (
+        <Animated.View
+          style={[
+            styles.messagesWrapper,
+            { paddingBottom: bottomPadding },
+          ]}
+        >
+          {hasMessages ? (
             <Messages
               messages={messages}
-              onScrollStateChange={setIsAtTop}
+              onScrollStateChange={handleScrollStateChange}
+              bottomOffset={listBottomOffset}
             />
           ) : (
             <View style={styles.helloWrapper}>
               <HelloByte />
-              {/* <TouchableOpacity
-                style={{
-                  backgroundColor: 'rgba(255,255,255,0.15)',
-                  padding: 10,
-                  borderRadius: 8,
-                  marginHorizontal: 16,
-                  marginBottom: 8,
-                }}
-                onPress={generateTestMessages}
-              >
-                <Text style={{ color: '#fff', textAlign: 'center' }}>
-                  📋 Загрузить тестовые сообщения
-                </Text>
-              </TouchableOpacity> */}
+              <TouchableOpacity style={styles.testButton} onPress={generateTestMessages}>
+                <Text style={styles.testButtonText}>📋 Загрузить тестовые сообщения</Text>
+              </TouchableOpacity>
             </View>
           )}
-        </View>
+        </Animated.View>
 
-        <View style={[styles.inputWrapper, { paddingBottom: inputPaddingBottom }]}>
-          {loading && <ActivityIndicator size="small" color="#007AFF" style={{ marginBottom: 8 }} />}
-          <Input onSend={handleSend} disabled={loading} />
-        </View>
+        {loading && (
+          <ActivityIndicator
+            size="small"
+            color="#007AFF"
+            style={styles.loader}
+          />
+        )}
+
+        <Input
+          onSend={handleSend}
+          disabled={loading}
+          extraBottom={extraBottom}
+          onLayout={onInputLayout}
+        />
       </Animated.View>
     </ScreenWrapper>
   );
@@ -164,13 +281,25 @@ const styles = StyleSheet.create({
   messagesWrapper: {
     flex: 1,
   },
-  inputWrapper: {
-    // paddingBottom задаётся динамически
-  },
   helloWrapper: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  testButton: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    padding: 10,
+    borderRadius: 8,
+    marginHorizontal: 16,
+    marginBottom: 100,
+  },
+  testButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+  },
+  loader: {
+    alignSelf: 'center',
+    marginBottom: 8,
   },
 });
 

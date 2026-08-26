@@ -1,10 +1,22 @@
 import React, { useRef, useEffect } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
+import { FlatList, StyleSheet, View, Keyboard } from "react-native";
 import Markdown from 'react-native-markdown-display';
 
-let Messages = (props: any) => {
-  const { messages, onScrollStateChange } = props;
+interface Message {
+  id: number;
+  who: 'user' | 'agent';
+  message: string;
+}
+
+interface MessagesProps {
+  messages: Message[];
+  onScrollStateChange?: (isAtTop: boolean) => void;
+  bottomOffset?: number; // дополнительный отступ снизу (высота инпута + extraBottom + зазор)
+}
+
+const Messages: React.FC<MessagesProps> = ({ messages, onScrollStateChange, bottomOffset = 0 }) => {
   const flatListRef = useRef<FlatList>(null);
+  const prevOffsetY = useRef(0);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -14,10 +26,16 @@ let Messages = (props: any) => {
 
   const handleScroll = (event: any) => {
     const { contentOffset } = event.nativeEvent;
-    const isAtTop = contentOffset.y <= 10;
+    const currentOffsetY = contentOffset.y;
+    const isAtTop = currentOffsetY <= 10;
     if (onScrollStateChange) {
       onScrollStateChange(isAtTop);
     }
+
+    if (currentOffsetY < prevOffsetY.current - 5) {
+      Keyboard.dismiss();
+    }
+    prevOffsetY.current = currentOffsetY;
   };
 
   return (
@@ -31,10 +49,10 @@ let Messages = (props: any) => {
             <Markdown style={markdownStyles}>{item.message}</Markdown>
           </View>
         )}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="always"
+        keyboardDismissMode="none"
         showsVerticalScrollIndicator={true}
-        contentContainerStyle={styles.contentAreaInner}
+        contentContainerStyle={[styles.contentAreaInner, { paddingBottom: 10 + bottomOffset }]}
         onScroll={handleScroll}
         scrollEventThrottle={100}
       />
@@ -49,7 +67,7 @@ const styles = StyleSheet.create({
   contentAreaInner: {
     gap: 5,
     paddingTop: 40,
-    paddingBottom: 10,
+    // paddingBottom будет динамическим
   },
   messageBubble: {
     padding: 10,

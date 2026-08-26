@@ -15,7 +15,7 @@ export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({
 }) => {
   return (
     <SafeAreaView 
-      edges={['left', 'right', 'bottom']} // 👈 добавляем bottom
+      edges={['left', 'right']} // 👈 добавляем bottom
       style={[styles.container, { backgroundColor: bg }, style]} 
       {...props} 
     >
