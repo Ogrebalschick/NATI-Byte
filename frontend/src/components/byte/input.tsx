@@ -51,9 +51,11 @@ const styles = StyleSheet.create({
         position: 'relative',
         backgroundColor: '#1E1F20',
         borderRadius: 20,
+        borderWidth:1,
+        borderColor:'#1E1F20',
         paddingTop: 16,
         paddingHorizontal: 16,
-        boxShadow: '0px 30px 50px 30px rgba(34, 60, 80, 0.5)'
+        boxShadow: '0px 30px 50px 30px rgba(34, 60, 80, 0.5)',
     },
      input: {
         color: '#fff',

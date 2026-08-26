@@ -1,7 +1,4 @@
-import HelloByte from '@/components/byte/helloByte';
-import Input from '@/components/byte/input';
-import Messages from '@/components/byte/messages';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Keyboard,
   Platform,
@@ -11,9 +8,12 @@ import {
   Alert,
   TouchableOpacity,
   Text,
+  Animated,
 } from 'react-native';
 import { ScreenWrapper } from '../components/ScreenWrapper';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import HelloByte from '@/components/byte/helloByte';
+import Input from '@/components/byte/input';
+import Messages from '@/components/byte/messages';
 
 interface Message {
   id: number;
@@ -27,21 +27,48 @@ const Byte = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const insets = useSafeAreaInsets();
-  const bottomInset = insets.bottom || 0;
+  const [isAtTop, setIsAtTop] = useState(true);
+  const translateY = useRef(new Animated.Value(0)).current;
+  const [inputPaddingBottom, setInputPaddingBottom] = useState(0);
 
   useEffect(() => {
     const showListener = Keyboard.addListener('keyboardDidShow', (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
+      const height = e.endCoordinates.height;
+      setKeyboardHeight(height);
+      if (isAtTop) {
+        // Вверху – не двигаем контейнер, только поднимаем input
+        Animated.timing(translateY, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
+        setInputPaddingBottom(height + 10);
+      } else {
+        // Внизу – сдвигаем контейнер, input поднимается вместе с ним
+        Animated.timing(translateY, {
+          toValue: -(height + 10),
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
+        setInputPaddingBottom(0);
+      }
     });
+
     const hideListener = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardHeight(0);
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }).start();
+      setInputPaddingBottom(0);
     });
+
     return () => {
       showListener.remove();
       hideListener.remove();
     };
-  }, []);
+  }, [isAtTop]);
 
   const handleSend = async (text: string) => {
     if (!text.trim()) return;
@@ -75,7 +102,6 @@ const Byte = () => {
     }
   };
 
-  // Временная тестовая функция (удалить потом)
   const generateTestMessages = () => {
     const longText =
       "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. ".repeat(
@@ -92,19 +118,19 @@ const Byte = () => {
     setMessages(testMessages);
   };
 
-  // 🔥 ИСПРАВЛЕНО: при открытой клавиатуре добавляем только зазор 10px
-  const inputPaddingBottom = keyboardHeight > 0 ? keyboardHeight + 10 : 0;
-
   return (
     <ScreenWrapper>
-      <View style={styles.container}>
+      <Animated.View style={[styles.container, { transform: [{ translateY }] }]}>
         <View style={styles.messagesWrapper}>
           {messages.length > 0 ? (
-            <Messages messages={messages} />
+            <Messages
+              messages={messages}
+              onScrollStateChange={setIsAtTop}
+            />
           ) : (
             <View style={styles.helloWrapper}>
               <HelloByte />
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 style={{
                   backgroundColor: 'rgba(255,255,255,0.15)',
                   padding: 10,
@@ -117,7 +143,7 @@ const Byte = () => {
                 <Text style={{ color: '#fff', textAlign: 'center' }}>
                   📋 Загрузить тестовые сообщения
                 </Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
           )}
         </View>
@@ -126,7 +152,7 @@ const Byte = () => {
           {loading && <ActivityIndicator size="small" color="#007AFF" style={{ marginBottom: 8 }} />}
           <Input onSend={handleSend} disabled={loading} />
         </View>
-      </View>
+      </Animated.View>
     </ScreenWrapper>
   );
 };
