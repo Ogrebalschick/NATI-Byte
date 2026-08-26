@@ -11,7 +11,7 @@ interface Message {
 interface MessagesProps {
   messages: Message[];
   onScrollStateChange?: (isAtTop: boolean) => void;
-  bottomOffset?: number; // дополнительный отступ снизу (высота инпута + extraBottom + зазор)
+  bottomOffset?: number;
 }
 
 const Messages: React.FC<MessagesProps> = ({ messages, onScrollStateChange, bottomOffset = 0 }) => {
@@ -51,7 +51,7 @@ const Messages: React.FC<MessagesProps> = ({ messages, onScrollStateChange, bott
         )}
         keyboardShouldPersistTaps="always"
         keyboardDismissMode="none"
-        showsVerticalScrollIndicator={true}
+        showsVerticalScrollIndicator={false} 
         contentContainerStyle={[styles.contentAreaInner, { paddingBottom: 10 + bottomOffset }]}
         onScroll={handleScroll}
         scrollEventThrottle={100}
