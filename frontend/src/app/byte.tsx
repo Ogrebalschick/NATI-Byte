@@ -24,6 +24,7 @@ interface Message {
 
 const API_URL = Platform.OS === 'android' ? 'http://192.168.0.179:8000' : 'http://localhost:8000';
 const INPUT_BOTTOM_OFFSET = 10;
+const MAX_HISTORY = 15;
 
 const Byte = () => {
   const insets = useSafeAreaInsets();
@@ -41,7 +42,6 @@ const Byte = () => {
   const messagesCountRef = useRef(messages.length);
   const isAtTopRef = useRef(isAtTop);
 
-  // Измерение высоты инпута
   const [inputHeight, setInputHeight] = useState(70);
   const onInputLayout = (event: any) => {
     const { height } = event.nativeEvent.layout;
@@ -56,7 +56,6 @@ const Byte = () => {
     isAtTopRef.current = isAtTop;
   }, [isAtTop]);
 
-  // Слушатели клавиатуры
   useEffect(() => {
     const showListener = Keyboard.addListener('keyboardDidShow', (e) => {
       const height = e.endCoordinates.height;
@@ -65,7 +64,6 @@ const Byte = () => {
 
       const hasMessages = messagesCountRef.current > 0;
       const atTop = isAtTopRef.current;
-
       const shouldShift = hasMessages && !atTop;
 
       if (shouldShift) {
@@ -120,12 +118,10 @@ const Byte = () => {
     };
   }, []);
 
-  // Синхронизация при изменении isAtTop или количества сообщений, если клавиатура открыта
   useEffect(() => {
     if (keyboardVisible && keyboardHeight > 0) {
       const hasMessages = messages.length > 0;
       const atTop = isAtTop;
-
       const shouldShift = hasMessages && !atTop;
 
       if (shouldShift) {
@@ -158,7 +154,6 @@ const Byte = () => {
     }
   }, [messages.length, isAtTop, keyboardVisible, keyboardHeight]);
 
-  // Обработчик скролла из Messages – игнорируем обновления, если клавиатура видна
   const handleScrollStateChange = (atTop: boolean) => {
     if (!keyboardVisible) {
       setIsAtTop(atTop);
@@ -167,17 +162,35 @@ const Byte = () => {
 
   const handleSend = async (text: string) => {
     if (!text.trim()) return;
+
     const userMessage: Message = {
       id: Date.now(),
       who: 'user',
       message: text.trim(),
     };
+
     setMessages((prev) => [...prev, userMessage]);
     setLoading(true);
+
+    const currentMessages = messages;
+    const fullHistory = [...currentMessages, userMessage];
+
+    const limitedHistory = fullHistory.slice(-MAX_HISTORY);
+
+    const conversation = limitedHistory.map((msg) => ({
+      role: msg.who === 'user' ? 'user' : 'assistant',
+      content: msg.message,
+    }));
+
     try {
-      const response = await fetch(
-        `${API_URL}/ask?query=${encodeURIComponent(text.trim())}`
-      );
+      const response = await fetch(`${API_URL}/ask`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messages: conversation }),
+      });
+
       const data = await response.json();
       if (response.ok) {
         const agentMessage: Message = {
@@ -196,6 +209,7 @@ const Byte = () => {
       setLoading(false);
     }
   };
+  // ============================================================
 
   const generateTestMessages = () => {
     const longText =
@@ -213,21 +227,17 @@ const Byte = () => {
     setMessages(testMessages);
   };
 
-  // Вычисляем extraBottom для Input
   const hasMessages = messages.length > 0;
   const atTop = isAtTop;
   const keyboardOpen = keyboardVisible;
 
-  let extraBottom = bottomInset; // всегда добавляем отступ от системной панели
-
+  let extraBottom = bottomInset;
   if (!hasMessages && keyboardOpen) {
     extraBottom += keyboardHeight + INPUT_BOTTOM_OFFSET;
   } else if (hasMessages && atTop && keyboardOpen) {
     extraBottom += keyboardHeight + INPUT_BOTTOM_OFFSET;
   }
-  // иначе только bottomInset
 
-  // Отступ для списка сообщений: высота инпута + extraBottom + небольшой зазор
   const listBottomOffset = inputHeight + extraBottom + 8;
 
   return (
@@ -248,9 +258,9 @@ const Byte = () => {
           ) : (
             <View style={styles.helloWrapper}>
               <HelloByte />
-              <TouchableOpacity style={styles.testButton} onPress={generateTestMessages}>
+              {/* <TouchableOpacity style={styles.testButton} onPress={generateTestMessages}>
                 <Text style={styles.testButtonText}>📋 Загрузить тестовые сообщения</Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
           )}
         </Animated.View>

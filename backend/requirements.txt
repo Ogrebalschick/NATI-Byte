@@ -5,3 +5,4 @@ gigachain-community
 chromadb
 python-dotenv
 pydantic
+langchain-gigachat
