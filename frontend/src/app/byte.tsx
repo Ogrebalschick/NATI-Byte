@@ -22,6 +22,8 @@ interface Message {
   id: number;
   who: 'user' | 'agent';
   message: string;
+  status?: 'typing' | 'error';
+  errorMessage?: string;
 }
 
 interface Chat {
@@ -251,23 +253,38 @@ const Byte = () => {
     }
   };
 
+  // ========== ОСНОВНАЯ ЛОГИКА ОТПРАВКИ ==========
   const handleSend = async (text: string) => {
     if (!text.trim() || !currentChatId) return;
 
+    // 1. Сообщение пользователя
     const userMessage: Message = {
       id: Date.now(),
       who: 'user',
       message: text.trim(),
     };
 
+    // 2. Временное сообщение от ИИ (печатает)
+    const typingMessage: Message = {
+      id: Date.now() + 1,
+      who: 'agent',
+      message: '',
+      status: 'typing',
+    };
+
+    // Добавляем оба сообщения в чат
     setChats(prev =>
       prev.map(chat =>
         chat.id === currentChatId
-          ? { ...chat, messages: [...chat.messages, userMessage] }
+          ? {
+              ...chat,
+              messages: [...chat.messages, userMessage, typingMessage],
+            }
           : chat
       )
     );
 
+    // Если чат новый, обновляем заголовок
     const currentChat = chats.find(c => c.id === currentChatId);
     if (currentChat && currentChat.title === 'Новый чат') {
       updateChatTitle(currentChatId, text.trim());
@@ -275,8 +292,14 @@ const Byte = () => {
 
     setLoading(true);
 
-    const updatedMessages = [...(currentChat?.messages || []), userMessage];
-    const limitedHistory = updatedMessages.slice(-MAX_HISTORY);
+    // Формируем историю (без временного сообщения, т.к. оно ещё не в стейте ? но мы добавили, нужно исключить typing)
+    // Для этого возьмём актуальные сообщения чата после добавления, но отфильтруем статус typing
+    // Мы можем получить обновлённый массив из стейта, но из-за асинхронности лучше использовать текущий стейт.
+    // Можно сделать: const chatAfter = chats.find(c => c.id === currentChatId);
+    // Но он ещё не обновлён. Поэтому формируем историю из предыдущих сообщений + новое пользовательское, исключая typing.
+    const prevMessages = currentChat?.messages || [];
+    const historyMessages = [...prevMessages, userMessage];
+    const limitedHistory = historyMessages.slice(-MAX_HISTORY);
     const conversation = limitedHistory.map((msg) => ({
       role: msg.who === 'user' ? 'user' : 'assistant',
       content: msg.message,
@@ -291,32 +314,64 @@ const Byte = () => {
       const data = await response.json();
       if (response.ok) {
         const agentMessage: Message = {
-          id: Date.now() + 1,
+          id: Date.now() + 2,
           who: 'agent',
           message: data.answer || 'Не удалось получить ответ',
         };
+        // Заменяем typingMessage на реальный ответ
         setChats(prev =>
-          prev.map(chat =>
-            chat.id === currentChatId
-              ? { ...chat, messages: [...chat.messages, agentMessage] }
-              : chat
-          )
+          prev.map(chat => {
+            if (chat.id !== currentChatId) return chat;
+            // Находим индекс typingMessage
+            const index = chat.messages.findIndex(m => m.id === typingMessage.id);
+            if (index === -1) return chat;
+            const newMessages = [...chat.messages];
+            newMessages[index] = agentMessage; // заменяем
+            return { ...chat, messages: newMessages };
+          })
         );
       } else {
-        Alert.alert('Ошибка', data.error || 'Неизвестная ошибка');
+        // Ошибка от сервера
+        setChats(prev =>
+          prev.map(chat => {
+            if (chat.id !== currentChatId) return chat;
+            const index = chat.messages.findIndex(m => m.id === typingMessage.id);
+            if (index === -1) return chat;
+            const newMessages = [...chat.messages];
+            newMessages[index] = {
+              ...typingMessage,
+              status: 'error',
+              errorMessage: data.error || 'Ошибка сервера',
+            };
+            return { ...chat, messages: newMessages };
+          })
+        );
       }
     } catch (error: any) {
-      Alert.alert('Ошибка', 'Не удалось соединиться с сервером.');
-      console.error(error);
+      // Ошибка сети или другая
+      setChats(prev =>
+        prev.map(chat => {
+          if (chat.id !== currentChatId) return chat;
+          const index = chat.messages.findIndex(m => m.id === typingMessage.id);
+          if (index === -1) return chat;
+          const newMessages = [...chat.messages];
+          newMessages[index] = {
+            ...typingMessage,
+            status: 'error',
+            errorMessage: 'Не удалось соединиться с сервером. Проверьте интернет.',
+          };
+          return { ...chat, messages: newMessages };
+        })
+      );
     } finally {
       setLoading(false);
     }
   };
+  // ==============================================
 
-  // Плавное закрытие с действием
   const closeMenuWithAction = (action: () => void) => {
-    setMenuOpen(false); // запускает анимацию закрытия в HistoryMenu
-    setTimeout(action, 350); // ждём окончания анимации (300ms + запас)
+    setMenuOpen(false);
+    setTimeout(action, 350);
   };
 
   const handleSelectChat = (chatId: string) => {

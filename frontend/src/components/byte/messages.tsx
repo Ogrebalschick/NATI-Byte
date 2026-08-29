@@ -1,11 +1,14 @@
-import React, { useRef, useEffect } from "react";
-import { FlatList, StyleSheet, View, Keyboard } from "react-native";
+import React, { useRef, useEffect, useState } from "react";
+import { FlatList, StyleSheet, View, Keyboard, Text, Animated } from "react-native";
 import Markdown from 'react-native-markdown-display';
 
+// Тип сообщения расширенный
 interface Message {
   id: number;
   who: 'user' | 'agent';
   message: string;
+  status?: 'typing' | 'error';
+  errorMessage?: string;
 }
 
 interface MessagesProps {
@@ -13,6 +16,55 @@ interface MessagesProps {
   onScrollStateChange?: (isAtTop: boolean) => void;
   bottomOffset?: number;
 }
+
+// Компонент анимированных трёх точек
+const TypingDots = () => {
+  const [opacity1] = useState(new Animated.Value(0));
+  const [opacity2] = useState(new Animated.Value(0));
+  const [opacity3] = useState(new Animated.Value(0));
+
+  useEffect(() => {
+    const animateDot = (value: Animated.Value, delay: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.timing(value, {
+            toValue: 1,
+            duration: 300,
+            delay,
+            useNativeDriver: true,
+          }),
+          Animated.timing(value, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    };
+
+    const anim1 = animateDot(opacity1, 0);
+    const anim2 = animateDot(opacity2, 300);
+    const anim3 = animateDot(opacity3, 600);
+
+    anim1.start();
+    anim2.start();
+    anim3.start();
+
+    return () => {
+      anim1.stop();
+      anim2.stop();
+      anim3.stop();
+    };
+  }, []);
+
+  return (
+    <View style={{ flexDirection: 'row', padding: 10 }}>
+      <Animated.Text style={[styles.dot, { opacity: opacity1 }]}>•</Animated.Text>
+      <Animated.Text style={[styles.dot, { opacity: opacity2 }]}>•</Animated.Text>
+      <Animated.Text style={[styles.dot, { opacity: opacity3 }]}>•</Animated.Text>
+    </View>
+  );
+};
 
 const Messages: React.FC<MessagesProps> = ({ messages, onScrollStateChange, bottomOffset = 0 }) => {
   const flatListRef = useRef<FlatList>(null);
@@ -38,20 +90,41 @@ const Messages: React.FC<MessagesProps> = ({ messages, onScrollStateChange, bott
     prevOffsetY.current = currentOffsetY;
   };
 
+  const renderItem = ({ item }: { item: Message }) => {
+    // Проверяем статус
+    if (item.status === 'typing') {
+      return (
+        <View style={[styles.messageBubble, styles.agentBubble]}>
+          <TypingDots />
+        </View>
+      );
+    }
+
+    if (item.status === 'error') {
+      return (
+        <View style={[styles.messageBubble, styles.agentBubble, styles.errorBubble]}>
+          <Text style={styles.errorText}>⚠️ {item.errorMessage || 'Не удалось получить ответ. Попробуйте ещё раз.'}</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={[styles.messageBubble, item.who === 'user' ? styles.userBubble : styles.agentBubble]}>
+        <Markdown style={markdownStyles}>{item.message}</Markdown>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.contentArea}>
       <FlatList
         ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
-          <View style={[styles.messageBubble, item.who === 'user' ? styles.userBubble : styles.agentBubble]}>
-            <Markdown style={markdownStyles}>{item.message}</Markdown>
-          </View>
-        )}
+        renderItem={renderItem}
         keyboardShouldPersistTaps="always"
         keyboardDismissMode="none"
-        showsVerticalScrollIndicator={false} 
+        showsVerticalScrollIndicator={true}
         contentContainerStyle={[styles.contentAreaInner, { paddingBottom: 10 + bottomOffset }]}
         onScroll={handleScroll}
         scrollEventThrottle={100}
@@ -67,7 +140,6 @@ const styles = StyleSheet.create({
   contentAreaInner: {
     gap: 5,
     paddingTop: 40,
-    // paddingBottom будет динамическим
   },
   messageBubble: {
     padding: 10,
@@ -90,6 +162,18 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     borderStartEndRadius: 0,
     marginRight: 'auto'
+  },
+  errorBubble: {
+    borderColor: '#ff3b30',
+  },
+  errorText: {
+    color: '#ff3b30',
+    fontSize: 16,
+  },
+  dot: {
+    fontSize: 30,
+    color: '#04CD73',
+    marginHorizontal: 2,
   },
 });
 
