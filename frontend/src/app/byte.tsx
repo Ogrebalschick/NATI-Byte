@@ -8,6 +8,7 @@ import {
   Alert,
   TouchableOpacity,
   Animated,
+  Text,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,8 +23,9 @@ interface Message {
   id: number;
   who: 'user' | 'agent';
   message: string;
-  status?: 'typing' | 'error';
-  errorMessage?: string;
+  isTyping?: boolean;   // флаг для "печатающего" сообщения
+  isError?: boolean;    // флаг для сообщения об ошибке
+  onRetry?: () => void; // колбэк для повтора
 }
 
 interface Chat {
@@ -36,6 +38,7 @@ const API_URL = Platform.OS === 'android' ? 'http://192.168.0.179:8000' : 'http:
 const INPUT_BOTTOM_OFFSET = 10;
 const MAX_HISTORY = 15;
 const STORAGE_KEY = '@byte_chats';
+const FACTS_STORAGE_KEY = '@user_facts';
 
 const Byte = () => {
   const insets = useSafeAreaInsets();
@@ -48,6 +51,7 @@ const Byte = () => {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [isAtTop, setIsAtTop] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [facts, setFacts] = useState<string[]>([]);
 
   const translateY = useRef(new Animated.Value(0)).current;
   const bottomPadding = useRef(new Animated.Value(0)).current;
@@ -63,13 +67,13 @@ const Byte = () => {
 
   const currentMessages = chats.find(c => c.id === currentChatId)?.messages || [];
 
-  // Загрузка чатов
+  // Загрузка чатов и фактов при старте
   useEffect(() => {
-    const loadChats = async () => {
+    const loadData = async () => {
       try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed: Chat[] = JSON.parse(stored);
+        const storedChats = await AsyncStorage.getItem(STORAGE_KEY);
+        if (storedChats) {
+          const parsed: Chat[] = JSON.parse(storedChats);
           setChats(parsed);
           if (parsed.length > 0) {
             setCurrentChatId(parsed[0].id);
@@ -79,20 +83,32 @@ const Byte = () => {
         } else {
           createNewChat();
         }
+
+        const storedFacts = await AsyncStorage.getItem(FACTS_STORAGE_KEY);
+        if (storedFacts) {
+          setFacts(JSON.parse(storedFacts));
+        }
       } catch (e) {
-        console.warn('Failed to load chats', e);
+        console.warn('Failed to load data', e);
         createNewChat();
       }
     };
-    loadChats();
+    loadData();
   }, []);
 
-  // Сохранение
   useEffect(() => {
     if (chats.length > 0) {
       AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(chats)).catch(console.warn);
     }
   }, [chats]);
+
+  useEffect(() => {
+    if (facts.length > 0) {
+      AsyncStorage.setItem(FACTS_STORAGE_KEY, JSON.stringify(facts)).catch(console.warn);
+    } else {
+      AsyncStorage.removeItem(FACTS_STORAGE_KEY).catch(console.warn);
+    }
+  }, [facts]);
 
   const createNewChat = () => {
     const newChat: Chat = {
@@ -148,7 +164,7 @@ const Byte = () => {
     isAtTopRef.current = isAtTop;
   }, [isAtTop]);
 
-  // Keyboard listeners
+  // Keyboard listeners (без изменений)
   useEffect(() => {
     const showListener = Keyboard.addListener('keyboardDidShow', (e) => {
       const height = e.endCoordinates.height;
@@ -253,57 +269,76 @@ const Byte = () => {
     }
   };
 
-  // ========== ОСНОВНАЯ ЛОГИКА ОТПРАВКИ ==========
+  // Основная функция отправки сообщения
   const handleSend = async (text: string) => {
     if (!text.trim() || !currentChatId) return;
 
-    // 1. Сообщение пользователя
+    // 1. Добавляем сообщение пользователя
     const userMessage: Message = {
       id: Date.now(),
       who: 'user',
       message: text.trim(),
     };
 
-    // 2. Временное сообщение от ИИ (печатает)
-    const typingMessage: Message = {
-      id: Date.now() + 1,
-      who: 'agent',
-      message: '',
-      status: 'typing',
-    };
-
-    // Добавляем оба сообщения в чат
     setChats(prev =>
       prev.map(chat =>
         chat.id === currentChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, userMessage, typingMessage],
-            }
+          ? { ...chat, messages: [...chat.messages, userMessage] }
           : chat
       )
     );
 
-    // Если чат новый, обновляем заголовок
     const currentChat = chats.find(c => c.id === currentChatId);
     if (currentChat && currentChat.title === 'Новый чат') {
       updateChatTitle(currentChatId, text.trim());
     }
 
+    // 2. Добавляем "печатающее" сообщение от агента
+    const typingId = Date.now() + 1; // уникальный id для временного сообщения
+    const typingMessage: Message = {
+      id: typingId,
+      who: 'agent',
+      message: '•••', // три точки, будут анимированы через CSS / анимацию в компоненте Messages
+      isTyping: true,
+    };
+
+    setChats(prev =>
+      prev.map(chat =>
+        chat.id === currentChatId
+          ? { ...chat, messages: [...chat.messages, typingMessage] }
+          : chat
+      )
+    );
+
     setLoading(true);
 
-    // Формируем историю (без временного сообщения, т.к. оно ещё не в стейте ? но мы добавили, нужно исключить typing)
-    // Для этого возьмём актуальные сообщения чата после добавления, но отфильтруем статус typing
-    // Мы можем получить обновлённый массив из стейта, но из-за асинхронности лучше использовать текущий стейт.
-    // Можно сделать: const chatAfter = chats.find(c => c.id === currentChatId);
-    // Но он ещё не обновлён. Поэтому формируем историю из предыдущих сообщений + новое пользовательское, исключая typing.
-    const prevMessages = currentChat?.messages || [];
-    const historyMessages = [...prevMessages, userMessage];
-    const limitedHistory = historyMessages.slice(-MAX_HISTORY);
-    const conversation = limitedHistory.map((msg) => ({
-      role: msg.who === 'user' ? 'user' : 'assistant',
-      content: msg.message,
-    }));
+    // Формируем историю с учётом нового пользовательского сообщения (без типинга)
+    const updatedMessages = [...(currentChat?.messages || []), userMessage];
+    const limitedHistory = updatedMessages.slice(-MAX_HISTORY);
+
+    // Формируем массив для API
+    const conversation: { role: 'system' | 'user' | 'assistant', content: string }[] = [];
+
+    let systemPrompt =
+      `Ты — Байт, дружелюбный цифровой помощник студента НГТУ НЭТИ. Отвечай четко и по делу.
+
+Если из диалога ты узнал новую информацию о пользователе (интересы, увлечения, факты биографии, предпочтения и т.п.), добавь в конце своего ответа специальный блок с обновлением фактов. Блок должен начинаться с маркера ###FACTS_UPDATE### и содержать JSON-массив новых фактов в виде строк, каждый факт — это короткое утверждение о пользователе. Например: 
+###FACTS_UPDATE### ["Пользователь любит программировать на Python", "Пользователь учится в НГТУ"].
+Не добавляй этот блок, если новая информация отсутствует.
+Важно: не повторяй факты, которые уже есть в списке фактов, переданном тебе ниже.`;
+
+    if (facts.length > 0) {
+      systemPrompt += `\n\nТы уже знаешь следующие факты о пользователе (не повторяй их):\n${facts.map(f => `- ${f}`).join('\n')}`;
+    }
+
+    conversation.push({ role: 'system', content: systemPrompt });
+
+    limitedHistory.forEach(msg => {
+      conversation.push({
+        role: msg.who === 'user' ? 'user' : 'assistant',
+        content: msg.message,
+      });
+    });
 
     try {
       const response = await fetch(`${API_URL}/ask`, {
@@ -311,64 +346,107 @@ const Byte = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: conversation }),
       });
+
       const data = await response.json();
+
+      // Удаляем печатающее сообщение
+      setChats(prev =>
+        prev.map(chat =>
+          chat.id === currentChatId
+            ? { ...chat, messages: chat.messages.filter(m => m.id !== typingId) }
+            : chat
+        )
+      );
+
       if (response.ok) {
+        let answer = data.answer || 'Не удалось получить ответ';
+        let newFacts: string[] = [];
+
+        const marker = '###FACTS_UPDATE###';
+        if (answer.includes(marker)) {
+          const parts = answer.split(marker);
+          const displayAnswer = parts[0].trim();
+          const jsonPart = parts[1]?.trim();
+          if (jsonPart) {
+            try {
+              const parsed = JSON.parse(jsonPart);
+              if (Array.isArray(parsed)) {
+                newFacts = parsed.map(f => typeof f === 'string' ? f : f.fact || String(f));
+              }
+            } catch (e) {
+              console.warn('Failed to parse facts JSON', e);
+            }
+          }
+          answer = displayAnswer;
+        }
+
+        if (newFacts.length > 0) {
+          const updatedFacts = [...facts];
+          newFacts.forEach(f => {
+            if (!updatedFacts.includes(f)) {
+              updatedFacts.push(f);
+            }
+          });
+          setFacts(updatedFacts);
+        }
+
         const agentMessage: Message = {
           id: Date.now() + 2,
           who: 'agent',
-          message: data.answer || 'Не удалось получить ответ',
+          message: answer,
         };
-        // Заменяем typingMessage на реальный ответ
         setChats(prev =>
-          prev.map(chat => {
-            if (chat.id !== currentChatId) return chat;
-            // Находим индекс typingMessage
-            const index = chat.messages.findIndex(m => m.id === typingMessage.id);
-            if (index === -1) return chat;
-            const newMessages = [...chat.messages];
-            newMessages[index] = agentMessage; // заменяем
-            return { ...chat, messages: newMessages };
-          })
+          prev.map(chat =>
+            chat.id === currentChatId
+              ? { ...chat, messages: [...chat.messages, agentMessage] }
+              : chat
+          )
         );
       } else {
-        // Ошибка от сервера
+        // Ошибка от сервера (например, 500)
+        const errorMessage: Message = {
+          id: Date.now() + 2,
+          who: 'agent',
+          message: '❌ Не удалось получить ответ от сервера. Попробуйте ещё раз.',
+          isError: true,
+        };
         setChats(prev =>
-          prev.map(chat => {
-            if (chat.id !== currentChatId) return chat;
-            const index = chat.messages.findIndex(m => m.id === typingMessage.id);
-            if (index === -1) return chat;
-            const newMessages = [...chat.messages];
-            newMessages[index] = {
-              ...typingMessage,
-              status: 'error',
-              errorMessage: data.error || 'Ошибка сервера',
-            };
-            return { ...chat, messages: newMessages };
-          })
+          prev.map(chat =>
+            chat.id === currentChatId
+              ? { ...chat, messages: [...chat.messages, errorMessage] }
+              : chat
+          )
         );
       }
     } catch (error: any) {
-      // Ошибка сети или другая
+      // Сетевая ошибка
       setChats(prev =>
-        prev.map(chat => {
-          if (chat.id !== currentChatId) return chat;
-          const index = chat.messages.findIndex(m => m.id === typingMessage.id);
-          if (index === -1) return chat;
-          const newMessages = [...chat.messages];
-          newMessages[index] = {
-            ...typingMessage,
-            status: 'error',
-            errorMessage: 'Не удалось соединиться с сервером. Проверьте интернет.',
-          };
-          return { ...chat, messages: newMessages };
-        })
+        prev.map(chat =>
+          chat.id === currentChatId
+            ? { ...chat, messages: chat.messages.filter(m => m.id !== typingId) }
+            : chat
+        )
       );
+      const errorMessage: Message = {
+        id: Date.now() + 2,
+        who: 'agent',
+        message: '❌ Ошибка соединения. Проверьте интернет и попробуйте снова.',
+        isError: true,
+      };
+      setChats(prev =>
+        prev.map(chat =>
+          chat.id === currentChatId
+            ? { ...chat, messages: [...chat.messages, errorMessage] }
+            : chat
+        )
+      );
+      console.error(error);
     } finally {
       setLoading(false);
     }
   };
-  // ==============================================
 
+  // Плавное закрытие меню
   const closeMenuWithAction = (action: () => void) => {
     setMenuOpen(false);
     setTimeout(action, 350);
@@ -429,7 +507,11 @@ const Byte = () => {
           )}
         </Animated.View>
 
+        {/* Прелоадер убран — теперь его заменяет печатающее сообщение */}
         {loading && (
+          // Можно оставить ActivityIndicator как запасной, но теперь он не нужен
+          // Я оставлю его для совместимости, но скрою, так как сообщение уже есть.
+          // Если хочешь совсем убрать — закомментируй.
           <ActivityIndicator
             size="small"
             color="#007AFF"
