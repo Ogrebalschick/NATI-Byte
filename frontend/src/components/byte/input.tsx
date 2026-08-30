@@ -6,7 +6,7 @@ interface InputProps {
     onSend: (text: string) => void;
     disabled?: boolean;
     extraBottom?: number;
-    onLayout?: (event: any) => void; // для измерения высоты
+    onLayout?: (event: any) => void;
 }
 
 const Input: React.FC<InputProps> = ({ onSend, disabled, extraBottom = 0, onLayout }) => {
@@ -40,7 +40,7 @@ const Input: React.FC<InputProps> = ({ onSend, disabled, extraBottom = 0, onLayo
 
     return (
         <Animated.View
-            onLayout={onLayout} // передаём измерение высоты
+            onLayout={onLayout}
             style={[
                 styles.inputWrapper,
                 {

@@ -7,9 +7,10 @@ import {
   ActivityIndicator,
   Alert,
   TouchableOpacity,
-  Animated,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScreenWrapper } from '../components/ScreenWrapper';
@@ -24,7 +25,6 @@ import {
   extractRiskFromResponse,
 } from '@/components/byte/crisis';
 
-// Экспортируем интерфейс для использования в других файлах
 export interface Message {
   id: number;
   who: 'user' | 'agent';
@@ -41,7 +41,6 @@ interface Chat {
 }
 
 const API_URL = Platform.OS === 'android' ? 'http://192.168.0.179:8000' : 'http://localhost:8000';
-const INPUT_BOTTOM_OFFSET = 10;
 const MAX_HISTORY = 15;
 const STORAGE_KEY = '@byte_chats';
 const FACTS_STORAGE_KEY = '@user_facts';
@@ -49,18 +48,14 @@ const FACTS_STORAGE_KEY = '@user_facts';
 const Byte = () => {
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom;
+  const tabBarHeight = useBottomTabBarHeight();
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [isAtTop, setIsAtTop] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [facts, setFacts] = useState<string[]>([]);
-
-  const translateY = useRef(new Animated.Value(0)).current;
-  const bottomPadding = useRef(new Animated.Value(0)).current;
 
   const messagesCountRef = useRef(0);
   const isAtTopRef = useRef(isAtTop);
@@ -73,7 +68,6 @@ const Byte = () => {
 
   const currentMessages = chats.find(c => c.id === currentChatId)?.messages || [];
 
-  // Загрузка чатов и фактов
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -170,115 +164,13 @@ const Byte = () => {
     isAtTopRef.current = isAtTop;
   }, [isAtTop]);
 
-  // Keyboard listeners
-  useEffect(() => {
-    const showListener = Keyboard.addListener('keyboardDidShow', (e) => {
-      const height = e.endCoordinates.height;
-      setKeyboardHeight(height);
-      setKeyboardVisible(true);
-
-      const hasMessages = messagesCountRef.current > 0;
-      const atTop = isAtTopRef.current;
-      const shouldShift = hasMessages && !atTop;
-
-      if (shouldShift) {
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: -(height + INPUT_BOTTOM_OFFSET),
-            duration: 250,
-            useNativeDriver: true,
-          }),
-          Animated.timing(bottomPadding, {
-            toValue: 0,
-            duration: 250,
-            useNativeDriver: false,
-          }),
-        ]).start();
-      } else {
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: 0,
-            duration: 250,
-            useNativeDriver: true,
-          }),
-          Animated.timing(bottomPadding, {
-            toValue: hasMessages ? 0 : height + INPUT_BOTTOM_OFFSET,
-            duration: 250,
-            useNativeDriver: false,
-          }),
-        ]).start();
-      }
-    });
-
-    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardHeight(0);
-      setKeyboardVisible(false);
-      Animated.parallel([
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.timing(bottomPadding, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: false,
-        }),
-      ]).start();
-    });
-
-    return () => {
-      showListener.remove();
-      hideListener.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (keyboardVisible && keyboardHeight > 0) {
-      const hasMessages = currentMessages.length > 0;
-      const atTop = isAtTop;
-      const shouldShift = hasMessages && !atTop;
-
-      if (shouldShift) {
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: -(keyboardHeight + INPUT_BOTTOM_OFFSET),
-            duration: 250,
-            useNativeDriver: true,
-          }),
-          Animated.timing(bottomPadding, {
-            toValue: 0,
-            duration: 250,
-            useNativeDriver: false,
-          }),
-        ]).start();
-      } else {
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: 0,
-            duration: 250,
-            useNativeDriver: true,
-          }),
-          Animated.timing(bottomPadding, {
-            toValue: hasMessages ? 0 : keyboardHeight + INPUT_BOTTOM_OFFSET,
-            duration: 250,
-            useNativeDriver: false,
-          }),
-        ]).start();
-      }
-    }
-  }, [currentMessages.length, isAtTop, keyboardVisible, keyboardHeight]);
-
   const handleScrollStateChange = (atTop: boolean) => {
-    if (!keyboardVisible) {
-      setIsAtTop(atTop);
-    }
+    setIsAtTop(atTop);
   };
 
   const handleSend = async (text: string) => {
     if (!text.trim() || !currentChatId) return;
 
-    // 1. Добавляем сообщение пользователя
     const userMessage: Message = {
       id: Date.now(),
       who: 'user',
@@ -298,7 +190,6 @@ const Byte = () => {
       updateChatTitle(currentChatId, text.trim());
     }
 
-    // 2. Добавляем "печатающее" сообщение
     const typingId = Date.now() + 1;
     const typingMessage: Message = {
       id: typingId,
@@ -317,7 +208,6 @@ const Byte = () => {
 
     setLoading(true);
 
-    // --- БЫСТРАЯ ПРОВЕРКА ПО КЛЮЧЕВЫМ СЛОВАМ (клиент) ---
     if (isCrisisMessage(text)) {
       setChats(prev =>
         prev.map(chat =>
@@ -337,16 +227,11 @@ const Byte = () => {
       setLoading(false);
       return;
     }
-    // --- КОНЕЦ БЫСТРОЙ ПРОВЕРКИ ---
 
-    // Формируем историю (без типинга)
     const updatedMessages = [...(currentChat?.messages || []), userMessage];
     const limitedHistory = updatedMessages.slice(-MAX_HISTORY);
-
-    // Формируем массив для API
     const conversation: { role: 'system' | 'user' | 'assistant', content: string }[] = [];
 
-    // НОВЫЙ СИСТЕМНЫЙ ПРОМПТ С ЗАПРОСОМ JSON
     let systemPrompt =
       `Ты — Байт, дружелюбный помощник студента НГТУ. Отвечай на вопрос пользователя, но также оцени его эмоциональное состояние по шкале от 1 до 10, где 1 – полное спокойствие, 10 – сильный стресс или отчаяние.
 
@@ -382,7 +267,6 @@ const Byte = () => {
         body: JSON.stringify({ messages: conversation }),
       });
 
-      // Удаляем печатающее сообщение
       setChats(prev =>
         prev.map(chat =>
           chat.id === currentChatId
@@ -395,11 +279,9 @@ const Byte = () => {
 
       if (response.ok) {
         const rawAnswer = data.answer || '';
-        // Пытаемся извлечь риск и ответ из JSON
         const parsed = extractRiskFromResponse(rawAnswer);
         if (parsed) {
           const { answer, riskScore } = parsed;
-          // Если риск высокий – показываем кризисное сообщение
           if (riskScore >= 7) {
             const crisisMsg = createCrisisMessage(Date.now() + 2);
             setChats(prev =>
@@ -412,7 +294,6 @@ const Byte = () => {
             setLoading(false);
             return;
           }
-          // Иначе – обычный ответ
           const agentMessage: Message = {
             id: Date.now() + 3,
             who: 'agent',
@@ -426,7 +307,6 @@ const Byte = () => {
             )
           );
         } else {
-          // Не удалось распарсить JSON – показываем как есть, но дополнительно проверяем по ключевым словам (защита)
           if (isCrisisMessage(rawAnswer)) {
             const crisisMsg = createCrisisMessage(Date.now() + 2);
             setChats(prev =>
@@ -453,7 +333,6 @@ const Byte = () => {
           );
         }
       } else {
-        // Ошибка от сервера
         const errorMessage = createErrorMessage('server');
         setChats(prev =>
           prev.map(chat =>
@@ -464,7 +343,6 @@ const Byte = () => {
         );
       }
     } catch (error: any) {
-      // Удаляем печатающее сообщение
       setChats(prev =>
         prev.map(chat =>
           chat.id === currentChatId
@@ -486,7 +364,6 @@ const Byte = () => {
     }
   };
 
-  // Плавное закрытие меню
   const closeMenuWithAction = (action: () => void) => {
     setMenuOpen(false);
     setTimeout(action, 350);
@@ -509,59 +386,52 @@ const Byte = () => {
   };
 
   const hasMessages = currentMessages.length > 0;
-  const atTop = isAtTop;
-  const keyboardOpen = keyboardVisible;
-
-  let extraBottom = bottomInset;
-  if (!hasMessages && keyboardOpen) {
-    extraBottom += keyboardHeight + INPUT_BOTTOM_OFFSET;
-  } else if (hasMessages && atTop && keyboardOpen) {
-    extraBottom += keyboardHeight + INPUT_BOTTOM_OFFSET;
-  }
-
-  const listBottomOffset = inputHeight + extraBottom + 8;
+  const listBottomOffset = inputHeight + 8;
 
   return (
     <ScreenWrapper>
-      <Animated.View style={[styles.container, { transform: [{ translateY }] }]}>
+      <View style={styles.container}>
         <TouchableOpacity style={[styles.burgerButton, { top: insets.top + 8 }]} onPress={toggleMenu}>
           <Ionicons name="menu" size={28} color="#fff" />
         </TouchableOpacity>
 
-        <Animated.View
-          style={[
-            styles.messagesWrapper,
-            { paddingBottom: bottomPadding },
-          ]}
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? tabBarHeight : 0}
         >
-          {hasMessages ? (
-            <Messages
-              messages={currentMessages}
-              onScrollStateChange={handleScrollStateChange}
-              bottomOffset={listBottomOffset}
-            />
-          ) : (
-            <View style={styles.helloWrapper}>
-              <HelloByte />
+          <View style={styles.flex}>
+            <View style={styles.messagesWrapper}>
+              {hasMessages ? (
+                <Messages
+                  messages={currentMessages}
+                  onScrollStateChange={handleScrollStateChange}
+                  bottomOffset={listBottomOffset}
+                />
+              ) : (
+                <View style={styles.helloWrapper}>
+                  <HelloByte />
+                </View>
+              )}
             </View>
-          )}
-        </Animated.View>
 
-        {loading && (
-          <ActivityIndicator
-            size="small"
-            color="#007AFF"
-            style={styles.loader}
-          />
-        )}
+            {loading && (
+              <ActivityIndicator
+                size="small"
+                color="#007AFF"
+                style={styles.loader}
+              />
+            )}
 
-        <Input
-          onSend={handleSend}
-          disabled={loading}
-          extraBottom={extraBottom}
-          onLayout={onInputLayout}
-        />
-      </Animated.View>
+            <Input
+              onSend={handleSend}
+              disabled={loading}
+              onLayout={onInputLayout}
+              extraBottom={6} // 👈 небольшой отступ от панели
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </View>
 
       <HistoryMenu
         isVisible={menuOpen}
@@ -578,6 +448,9 @@ const Byte = () => {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  flex: {
     flex: 1,
   },
   messagesWrapper: {

@@ -1,14 +1,14 @@
 import React, { useRef, useEffect, useState } from "react";
-import { FlatList, StyleSheet, View, Keyboard, Text, Animated } from "react-native";
+import { FlatList, StyleSheet, View, Keyboard, Text } from "react-native";
 import Markdown from 'react-native-markdown-display';
 
-// Тип сообщения расширенный
 interface Message {
   id: number;
   who: 'user' | 'agent';
   message: string;
-  status?: 'typing' | 'error';
-  errorMessage?: string;
+  isTyping?: boolean;
+  isError?: boolean;
+  isCrisis?: boolean;
 }
 
 interface MessagesProps {
@@ -16,55 +16,6 @@ interface MessagesProps {
   onScrollStateChange?: (isAtTop: boolean) => void;
   bottomOffset?: number;
 }
-
-// Компонент анимированных трёх точек
-const TypingDots = () => {
-  const [opacity1] = useState(new Animated.Value(0));
-  const [opacity2] = useState(new Animated.Value(0));
-  const [opacity3] = useState(new Animated.Value(0));
-
-  useEffect(() => {
-    const animateDot = (value: Animated.Value, delay: number) => {
-      return Animated.loop(
-        Animated.sequence([
-          Animated.timing(value, {
-            toValue: 1,
-            duration: 300,
-            delay,
-            useNativeDriver: true,
-          }),
-          Animated.timing(value, {
-            toValue: 0,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-    };
-
-    const anim1 = animateDot(opacity1, 0);
-    const anim2 = animateDot(opacity2, 300);
-    const anim3 = animateDot(opacity3, 600);
-
-    anim1.start();
-    anim2.start();
-    anim3.start();
-
-    return () => {
-      anim1.stop();
-      anim2.stop();
-      anim3.stop();
-    };
-  }, []);
-
-  return (
-    <View style={{ flexDirection: 'row', padding: 10 }}>
-      <Animated.Text style={[styles.dot, { opacity: opacity1 }]}>•</Animated.Text>
-      <Animated.Text style={[styles.dot, { opacity: opacity2 }]}>•</Animated.Text>
-      <Animated.Text style={[styles.dot, { opacity: opacity3 }]}>•</Animated.Text>
-    </View>
-  );
-};
 
 const Messages: React.FC<MessagesProps> = ({ messages, onScrollStateChange, bottomOffset = 0 }) => {
   const flatListRef = useRef<FlatList>(null);
@@ -90,26 +41,42 @@ const Messages: React.FC<MessagesProps> = ({ messages, onScrollStateChange, bott
     prevOffsetY.current = currentOffsetY;
   };
 
+  // Компонент индикатора печатания
+  const TypingIndicator = () => {
+    const [dots, setDots] = useState('•');
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setDots(prev => {
+          if (prev === '•') return '••';
+          if (prev === '••') return '•••';
+          return '•';
+        });
+      }, 500);
+      return () => clearInterval(interval);
+    }, []);
+    return <Text style={{ color: '#fff', fontSize: 20 }}>{dots}</Text>;
+  };
+
   const renderItem = ({ item }: { item: Message }) => {
-    // Проверяем статус
-    if (item.status === 'typing') {
+    if (item.isTyping) {
       return (
         <View style={[styles.messageBubble, styles.agentBubble]}>
-          <TypingDots />
+          <TypingIndicator />
         </View>
       );
     }
 
-    if (item.status === 'error') {
-      return (
-        <View style={[styles.messageBubble, styles.agentBubble, styles.errorBubble]}>
-          <Text style={styles.errorText}>⚠️ {item.errorMessage || 'Не удалось получить ответ. Попробуйте ещё раз.'}</Text>
-        </View>
-      );
-    }
+    // Можно добавить стилизацию для ошибок или кризисных сообщений
+    const bubbleStyle = item.isError
+      ? styles.errorBubble
+      : item.isCrisis
+      ? styles.crisisBubble
+      : item.who === 'user'
+      ? styles.userBubble
+      : styles.agentBubble;
 
     return (
-      <View style={[styles.messageBubble, item.who === 'user' ? styles.userBubble : styles.agentBubble]}>
+      <View style={[styles.messageBubble, bubbleStyle]}>
         <Markdown style={markdownStyles}>{item.message}</Markdown>
       </View>
     );
@@ -165,15 +132,21 @@ const styles = StyleSheet.create({
   },
   errorBubble: {
     borderColor: '#ff3b30',
+    justifyContent: 'flex-end',
+    maxWidth: "100%",
+    textAlign: 'left',
+    borderStartEndRadius: 0,
+    marginRight: 'auto',
+    backgroundColor: 'rgba(255,59,48,0.1)',
   },
-  errorText: {
-    color: '#ff3b30',
-    fontSize: 16,
-  },
-  dot: {
-    fontSize: 30,
-    color: '#04CD73',
-    marginHorizontal: 2,
+  crisisBubble: {
+    borderColor: '#ff9500',
+    justifyContent: 'flex-end',
+    maxWidth: "100%",
+    textAlign: 'left',
+    borderStartEndRadius: 0,
+    marginRight: 'auto',
+    backgroundColor: 'rgba(255,149,0,0.1)',
   },
 });
 

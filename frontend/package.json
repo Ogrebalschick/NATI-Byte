@@ -7,6 +7,8 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-masked-view/masked-view": "0.3.2",
+    "@react-navigation/bottom-tabs": "^7.18.18",
+    "@react-navigation/native": "^7.3.18",
     "expo": "~54.0.0",
     "expo-android-keyboard-fix": "^2.1.0",
     "expo-constants": "~18.0.13",
