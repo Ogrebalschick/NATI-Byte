@@ -1,23 +1,13 @@
 /**
- * @deprecated Этот файл оставлен для справки.
- * Начиная с Expo SDK 56, навигация перенесена в файловую структуру expo-router:
- *   src/app/(tabs)/_layout.tsx  ← замена этого навигатора
- *   src/app/(tabs)/chat.tsx, statistics.tsx, todos.tsx, notes.tsx, profile.tsx
- *
- * Импорты обновлены с @react-navigation/bottom-tabs
- * на expo-router/js-tabs (официальный модуль SDK 56+).
+ * Табовый навигатор — expo-router файловая замена BottomTabNavigator.tsx.
+ * Импорты идут из expo-router/js-tabs (официальный модуль SDK 56+),
+ * а не из устаревшего @react-navigation/bottom-tabs.
  */
-import React from 'react';
 import { Tabs } from 'expo-router/js-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
 
-// createBottomTabNavigator больше не нужен — используем Tabs из expo-router/js-tabs
-// в src/app/(tabs)/_layout.tsx. Ниже оставлена старая реализация для истории.
-// Экраны теперь регистрируются файлами маршрутов, а не через component-пропс.
-
-const BottomTabNavigator = () => {
-
+export default function TabLayout() {
   return (
     <Tabs
       screenOptions={({ route }) => ({
@@ -25,19 +15,19 @@ const BottomTabNavigator = () => {
           let iconName: keyof typeof Ionicons.glyphMap = 'help-circle';
 
           switch (route.name) {
-            case 'Статистика':
+            case 'statistics':
               iconName = focused ? 'stats-chart' : 'stats-chart-outline';
               break;
-            case 'Список дел':
+            case 'todos':
               iconName = focused ? 'checkbox' : 'checkbox-outline';
               break;
-            case 'Чат':
+            case 'chat':
               iconName = focused ? 'chatbubble' : 'chatbubble-outline';
               break;
-            case 'Заметки':
+            case 'notes':
               iconName = focused ? 'document-text' : 'document-text-outline';
               break;
-            case 'Профиль':
+            case 'profile':
               iconName = focused ? 'person' : 'person-outline';
               break;
             default:
@@ -69,6 +59,4 @@ const BottomTabNavigator = () => {
       <Tabs.Screen name="profile"    options={{ title: 'Профиль' }} />
     </Tabs>
   );
-};
-
-export default BottomTabNavigator;
+}

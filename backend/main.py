@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
 from dotenv import load_dotenv
@@ -6,18 +7,31 @@ import os
 from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
+from auth import router as auth_router
+
 load_dotenv()
 app = FastAPI(title="Байт Бэкенд")
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Подключаем роуты аутентификации
+app.include_router(auth_router)
 
 chat = GigaChat(
     credentials=os.getenv("GIGACHAT_CREDENTIALS"),
     verify_ssl_certs=False,
-    model="GigaChat-2-Pro"   # или "GigaChat"
+    model="GigaChat-2-Pro"
 )
 
-# Модель для входящего запроса
 class Message(BaseModel):
-    role: str   # "user" или "assistant" (можно также "system")
+    role: str
     content: str
 
 class AskRequest(BaseModel):
@@ -30,8 +44,6 @@ def read_root():
 @app.post("/ask")
 def ask_bot(request: AskRequest):
     try:
-        # Преобразуем список сообщений в формат GigaChat
-        # GigaChat ожидает список объектов BaseMessage (HumanMessage, SystemMessage, AIMessage)
         gigachat_messages = []
         for msg in request.messages:
             if msg.role == "user":
@@ -40,10 +52,6 @@ def ask_bot(request: AskRequest):
                 gigachat_messages.append(AIMessage(content=msg.content))
             elif msg.role == "system":
                 gigachat_messages.append(SystemMessage(content=msg.content))
-            # если role другое, можно игнорировать или добавить как HumanMessage
-
-        # Если нужно добавить системный промпт, можно вставить в начало:
-        # gigachat_messages.insert(0, SystemMessage(content="Ты — Байт, дружелюбный помощник."))
 
         response = chat.invoke(gigachat_messages)
         return {"answer": response.content}

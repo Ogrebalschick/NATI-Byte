@@ -1,8 +1,9 @@
 fastapi
 uvicorn
-gigachain
-gigachain-community
-chromadb
 python-dotenv
 pydantic
 langchain-gigachat
+passlib[bcrypt]
+python-jose[cryptography]
+sqlalchemy
+email-validator
