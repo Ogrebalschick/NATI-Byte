@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, JSON, ForeignKey, Boolean, Float, text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, JSON, ForeignKey, Boolean, Float, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy import inspect as sa_inspect
@@ -27,6 +27,7 @@ class User(Base):
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
     student_data = relationship("StudentData", back_populates="user", cascade="all, delete-orphan")
     custom_subjects = relationship("CustomSubject", back_populates="user", cascade="all, delete-orphan")
+    notes = relationship("Note", back_populates="user", cascade="all, delete-orphan")
 
 
 class Chat(Base):
@@ -79,6 +80,20 @@ class ScoreLog(Base):
     subject = relationship("CustomSubject", back_populates="scores")
 
 
+class Note(Base):
+    """Student markdown note. `category` is one label, or several joined by a comma."""
+    __tablename__ = "notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    title = Column(String, nullable=False, default="")
+    content = Column(Text, nullable=False, default="")
+    category = Column(String, nullable=False, default="Разное")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    user = relationship("User", back_populates="notes")
+
+
 def _run_migrations() -> None:
     """Lightweight schema migration: create missing tables and add missing columns."""
     # create_all is idempotent and will add new tables without dropping existing data.
@@ -111,6 +126,22 @@ def _run_migrations() -> None:
                     conn.execute(text(ddl))
                     conn.commit()
                     print(f"[DB] Added missing column custom_subjects.{col_name}")
+
+        if "notes" in tables:
+            note_cols = [c["name"] for c in inspector.get_columns("notes")]
+            note_patches = {
+                "title": "ALTER TABLE notes ADD COLUMN title VARCHAR DEFAULT ''",
+                "content": "ALTER TABLE notes ADD COLUMN content TEXT DEFAULT ''",
+                "category": "ALTER TABLE notes ADD COLUMN category VARCHAR DEFAULT 'Разное'",
+                "created_at": "ALTER TABLE notes ADD COLUMN created_at DATETIME",
+                "updated_at": "ALTER TABLE notes ADD COLUMN updated_at DATETIME",
+                "user_id": "ALTER TABLE notes ADD COLUMN user_id INTEGER",
+            }
+            for col_name, ddl in note_patches.items():
+                if col_name not in note_cols:
+                    conn.execute(text(ddl))
+                    conn.commit()
+                    print(f"[DB] Added missing column notes.{col_name}")
 
 
 # Create all tables (no-op if they already exist) then patch any missing columns

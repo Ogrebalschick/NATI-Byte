@@ -115,6 +115,33 @@ class CustomSubjectResponse(BaseModel):
     scores: List[ScoreLogResponse] = []
 
 
+# ── Student notes ─────────────────────────────────────────────────────────────
+
+class NoteCreate(BaseModel):
+    title: str = ""
+    content: str = ""
+    category: Optional[str] = None
+    ai_classify: bool = False
+    created_at: Optional[datetime] = None
+
+
+class NoteUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+    ai_classify: bool = False
+
+
+class NoteResponse(BaseModel):
+    id: int
+    user_id: int
+    title: str
+    content: str
+    category: str
+    created_at: datetime
+    updated_at: datetime
+
+
 # Kept for backward-compat (internal use)
 class UserCreate(BaseModel):
     email: EmailStr

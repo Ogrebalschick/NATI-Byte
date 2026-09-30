@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-native-markdown-display';
 import {
+  ActivityIndicator,
   Alert,
   Keyboard,
   KeyboardAvoidingView,
@@ -17,7 +18,15 @@ import {
 } from 'react-native';
 import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { createNote, deleteNote, fetchNotes, joinCategory, updateNote } from '../api/notesApi';
+import { useAuth } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
+import {
+  loadCategoryCatalog,
+  loadGuestNotes,
+  saveCategoryCatalog,
+  saveGuestNotes,
+} from '../storage/notesStorage';
 
 type ScreenView = 'list' | 'edit';
 type SheetMode = 'assign' | 'create';
@@ -57,43 +66,18 @@ const BUILTIN_TONE: Record<string, CategoryTone> = {
   Лабы: TONE_PALETTE[3],
 };
 
-const MOCK_NOTES: Note[] = [
-  {
-    id: 'note-1',
-    title: 'Кинематика точки',
-    body: 'Скорость — производная радиус-вектора по времени. Ускорение раскладываем на тангенциальное и нормальное.\n\n**Формула:** a = dv/dt.',
-    categories: ['Физика'],
-    createdAt: '2026-09-28T10:12:00',
-  },
-  {
-    id: 'note-2',
-    title: 'Что повторить к сессии',
-    body: '1. Законы Ньютона и примеры задач.\n2. Интегралы по частям — билеты 4 и 7.\n3. Конспект по термодинамике, глава 3.',
-    categories: ['Сессия', 'Физика'],
-    createdAt: '2026-09-26T19:40:00',
-  },
-  {
-    id: 'note-3',
-    title: 'Лаба: маятник',
-    body: 'Период малых колебаний T = 2π√(l/g). Снять 10 измерений длины и периода, погрешность считать по Стьюденту.',
-    categories: ['Лабы', 'Физика'],
-    createdAt: '2026-09-22T14:05:00',
-  },
-  {
-    id: 'note-4',
-    title: 'Идеи для проекта',
-    body: 'Синхронизация заметок между телефоном и вебом. Теги по предметам. Поиск по тексту конспекта.',
-    categories: ['Разное'],
-    createdAt: '2026-09-18T08:30:00',
-  },
-  {
-    id: 'note-5',
-    title: 'Электростатика',
-    body: 'Теорема Гаусса удобна для симметричных полей: сфера, цилиндр, плоскость. Поток считаем через замкнутую поверхность.',
-    categories: ['Физика'],
-    createdAt: '2026-09-14T16:20:00',
-  },
-];
+function collectCategories(base: string[], groups: string[][]): string[] {
+  const next = [...base];
+  for (const name of groups.flat()) {
+    const trimmed = name.trim();
+    if (trimmed && !next.includes(trimmed)) next.push(trimmed);
+  }
+  return next;
+}
+
+function isServerNoteId(id: string): boolean {
+  return /^\d+$/.test(id);
+}
 
 function categoryTone(name: string, index: number): CategoryTone {
   return BUILTIN_TONE[name] ?? TONE_PALETTE[Math.abs(index) % TONE_PALETTE.length];
@@ -167,11 +151,15 @@ function applyLinePrefix(
 const NotesScreen = () => {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
+  const { isAuthenticated, token } = useAuth();
   const bodyRef = useRef<TextInput>(null);
   const selectionRef = useRef<Selection>({ start: 0, end: 0 });
+  const hydrated = useRef(false);
 
-  const [notes, setNotes] = useState<Note[]>(MOCK_NOTES);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [view, setView] = useState<ScreenView>('list');
   const [filter, setFilter] = useState(ALL_FILTER);
   const [query, setQuery] = useState('');
@@ -181,6 +169,58 @@ const NotesScreen = () => {
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [sheet, setSheet] = useState<SheetMode | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    hydrated.current = false;
+    setLoaded(false);
+
+    (async () => {
+      try {
+        const catalog = await loadCategoryCatalog();
+        if (isAuthenticated && token) {
+          let guest = await loadGuestNotes();
+          while (guest.length > 0) {
+            const note = guest[0];
+            await createNote(token, {
+              title: note.title,
+              content: note.body,
+              category: joinCategory(note.categories),
+              ai_classify: false,
+              created_at: note.createdAt,
+            });
+            guest = guest.slice(1);
+            await saveGuestNotes(guest);
+          }
+          const remote = await fetchNotes(token);
+          if (cancelled) return;
+          setNotes(remote);
+          setCategories(collectCategories(INITIAL_CATEGORIES, [catalog, ...remote.map(note => note.categories)]));
+        } else {
+          const local = await loadGuestNotes();
+          if (cancelled) return;
+          setNotes(local);
+          setCategories(collectCategories(INITIAL_CATEGORIES, [catalog, ...local.map(note => note.categories)]));
+        }
+      } catch (err: any) {
+        if (!cancelled) Alert.alert('Заметки', err?.message || 'Не удалось загрузить заметки');
+      } finally {
+        if (!cancelled) {
+          hydrated.current = true;
+          setLoaded(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, token]);
+
+  useEffect(() => {
+    if (!hydrated.current) return;
+    saveCategoryCatalog(categories).catch(() => undefined);
+  }, [categories]);
 
   const selecting = selectedIds.length > 0;
   const needle = query.trim().toLowerCase();
@@ -219,33 +259,69 @@ const NotesScreen = () => {
   };
 
   const closeEditor = () => {
+    if (saving) return;
     if (!draft) {
       setView('list');
       return;
     }
     const title = draft.title.trim();
-    const body = draft.body.trim();
-    if (draft.isNew && !title && !body) {
+    const body = draft.body;
+    if (draft.isNew && !title && !body.trim()) {
       setDraft(null);
       setPreview(false);
       setView('list');
       return;
     }
-    const saved: Note = {
-      id: draft.id,
-      title: title || 'Без названия',
-      body: draft.body,
-      categories: draft.categories,
-      createdAt: draft.createdAt,
+
+    const finish = (saved: Note, nextNotes: Note[]) => {
+      setCategories(prev => collectCategories(prev, [saved.categories]));
+      setNotes(nextNotes);
+      setDraft(null);
+      setPreview(false);
+      setView('list');
     };
-    setNotes(prev => {
-      const exists = prev.some(note => note.id === saved.id);
-      if (!exists) return [saved, ...prev];
-      return prev.map(note => (note.id === saved.id ? saved : note));
+
+    const localNote = (): Note => ({
+      id: draft.isNew ? `local-${Date.now()}` : draft.id,
+      title: title || 'Без названия',
+      body,
+      categories: draft.categories.length > 0 ? [...draft.categories] : ['Разное'],
+      createdAt: draft.createdAt,
     });
-    setDraft(null);
-    setPreview(false);
-    setView('list');
+
+    if (!isAuthenticated || !token) {
+      const saved = localNote();
+      const nextNotes = draft.isNew
+        ? [saved, ...notes]
+        : notes.map(note => (note.id === saved.id ? saved : note));
+      saveGuestNotes(nextNotes).catch(() => undefined);
+      finish(saved, nextNotes);
+      return;
+    }
+
+    setSaving(true);
+    const payload = {
+      title: title || 'Без названия',
+      content: body,
+      category: joinCategory(draft.categories),
+      ai_classify: aiEnabled,
+      created_at: draft.createdAt,
+    };
+    const request =
+      draft.isNew || !isServerNoteId(draft.id)
+        ? createNote(token, payload)
+        : updateNote(token, Number(draft.id), payload);
+
+    request
+      .then(saved => {
+        const withoutDraft = notes.filter(note => note.id !== draft.id);
+        const nextNotes = [saved, ...withoutDraft.filter(note => note.id !== saved.id)];
+        finish(saved, nextNotes);
+      })
+      .catch((err: any) => {
+        Alert.alert('Заметки', err?.message || 'Не удалось сохранить заметку');
+      })
+      .finally(() => setSaving(false));
   };
 
   const toggleDraftCategory = (name: string) => {
@@ -285,36 +361,84 @@ const NotesScreen = () => {
         text: 'Удалить',
         style: 'destructive',
         onPress: () => {
-          setNotes(prev => prev.filter(note => !selectedIds.includes(note.id)));
-          setSelectedIds([]);
+          const ids = [...selectedIds];
+          const nextNotes = notes.filter(note => !ids.includes(note.id));
+          const dropLocal = () => {
+            setNotes(nextNotes);
+            setSelectedIds([]);
+            if (!isAuthenticated) saveGuestNotes(nextNotes).catch(() => undefined);
+          };
+          if (!isAuthenticated || !token) {
+            dropLocal();
+            return;
+          }
+          Promise.all(ids.filter(isServerNoteId).map(id => deleteNote(token, Number(id))))
+            .then(dropLocal)
+            .catch((err: any) => {
+              Alert.alert('Заметки', err?.message || 'Не удалось удалить заметки');
+            });
         },
       },
     ]);
   };
 
-  const assignCategories = (names: string[]) => {
-    setNotes(prev =>
-      prev.map(note => {
-        if (!selectedIds.includes(note.id)) return note;
-        return { ...note, categories: names.reduce(withCategory, note.categories) };
-      }),
+  const writeNoteCategories = async (nextNotes: Note[], changedIds: string[]) => {
+    if (!isAuthenticated || !token) {
+      setNotes(nextNotes);
+      await saveGuestNotes(nextNotes);
+      return;
+    }
+    const changed = nextNotes.filter(note => changedIds.includes(note.id) && isServerNoteId(note.id));
+    const saved = await Promise.all(
+      changed.map(note =>
+        updateNote(token, Number(note.id), {
+          title: note.title,
+          content: note.body,
+          category: joinCategory(note.categories),
+          ai_classify: false,
+        }),
+      ),
     );
-    setSelectedIds([]);
-    setSheet(null);
+    const byId = new Map(saved.map(note => [note.id, note]));
+    setNotes(nextNotes.map(note => byId.get(note.id) ?? note));
+    setCategories(prev => collectCategories(prev, [saved.flatMap(note => note.categories)]));
+  };
+
+  const assignCategories = (names: string[]) => {
+    const ids = [...selectedIds];
+    const nextNotes = notes.map(note => {
+      if (!ids.includes(note.id)) return note;
+      return { ...note, categories: names.reduce(withCategory, note.categories) };
+    });
+    writeNoteCategories(nextNotes, ids)
+      .then(() => {
+        setSelectedIds([]);
+        setSheet(null);
+      })
+      .catch((err: any) => {
+        Alert.alert('Заметки', err?.message || 'Не удалось обновить категории');
+      });
   };
 
   const createCategory = (name: string, noteIds: string[]) => {
-    setCategories(prev => [...prev, name]);
-    if (noteIds.length > 0) {
-      setNotes(prev =>
-        prev.map(note =>
-          noteIds.includes(note.id) ? { ...note, categories: withCategory(note.categories, name) } : note,
-        ),
-      );
+    setCategories(prev => (prev.includes(name) ? prev : [...prev, name]));
+    const nextNotes = notes.map(note =>
+      noteIds.includes(note.id) ? { ...note, categories: withCategory(note.categories, name) } : note,
+    );
+    const done = () => {
+      setFilter(name);
+      setSelectedIds([]);
+      setSheet(null);
+    };
+    if (noteIds.length === 0) {
+      done();
+      return;
     }
-    setFilter(name);
-    setSelectedIds([]);
-    setSheet(null);
+    writeNoteCategories(nextNotes, noteIds)
+      .then(done)
+      .catch((err: any) => {
+        Alert.alert('Заметки', err?.message || 'Не удалось добавить категорию');
+      });
   };
 
   const applyMarkup = (
@@ -349,8 +473,12 @@ const NotesScreen = () => {
               accessibilityLabel="Закрыть редактор"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="chevron-back" size={22} color="#0A84FF" />
-              <Text style={styles.backText}>Заметки</Text>
+              {saving ? (
+                <ActivityIndicator size="small" color="#0A84FF" />
+              ) : (
+                <Ionicons name="chevron-back" size={22} color="#0A84FF" />
+              )}
+              <Text style={styles.backText}>{saving ? 'Сохранение…' : 'Заметки'}</Text>
             </TouchableOpacity>
           </View>
 
@@ -588,7 +716,7 @@ const NotesScreen = () => {
             })}
           </ScrollView>
 
-          {visibleNotes.length === 0 ? (
+          {loaded && visibleNotes.length === 0 ? (
             <View style={styles.emptyCard}>
               <Ionicons name={needle ? 'search' : 'document-text-outline'} size={28} color="#0A84FF" />
               <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
@@ -768,6 +896,10 @@ function CategorySheet({ mode, notes, categories, onClose, onCreate, onAssign }:
     const trimmed = name.trim();
     if (!trimmed) {
       setError('Введите название категории');
+      return;
+    }
+    if (trimmed.includes(',')) {
+      setError('Название не должно содержать запятую');
       return;
     }
     if (trimmed.toLowerCase() === ALL_FILTER.toLowerCase()) {

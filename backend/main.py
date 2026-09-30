@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from auth import router as auth_router
 from parser import router as sync_router
 from subjects import router as subjects_router
+from notes import router as notes_router
 
 load_dotenv()
 app = FastAPI(title="Байт Бэкенд")
@@ -27,6 +28,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(sync_router)
 app.include_router(subjects_router)
+app.include_router(notes_router)
 
 chat = GigaChat(
     credentials=os.getenv("GIGACHAT_CREDENTIALS"),
