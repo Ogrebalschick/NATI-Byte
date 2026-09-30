@@ -494,6 +494,7 @@ const AuthenticatedProfile = () => {
     confirmPasswordReset,
     parseCabinet,
     setPassword,
+    markLastSync,
   } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -561,6 +562,7 @@ const AuthenticatedProfile = () => {
 
   const handleNstuFinished = () => {
     setIsWebViewVisible(false);
+    markLastSync().catch(() => {});
     setSuccessMessage('Профиль и расписание НГТУ успешно импортированы!');
     if (nstuSuccessTimer.current) clearTimeout(nstuSuccessTimer.current);
     nstuSuccessTimer.current = setTimeout(() => setSuccessMessage(null), 6000);

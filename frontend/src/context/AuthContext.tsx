@@ -1,8 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import {
+  NstuImportModal,
+  type CabinetPageType,
+} from '../components/NstuImportModal';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
+
+export type SyncStatus = 'idle' | 'syncing' | 'error_auth' | 'success';
+
+const LAST_SYNC_KEY = '@last_sync_date';
+const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 interface User {
   id: number;
@@ -20,6 +29,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  syncStatus: SyncStatus;
 
   // Standard login — throws {type:'requires_verification'} error when 2FA is on
   login: (email: string, password: string) => Promise<void>;
@@ -36,9 +46,10 @@ interface AuthContextType {
   toggle2FA: (enabled: boolean) => Promise<void>;
   requestPasswordReset: () => Promise<void>;
   confirmPasswordReset: (code: string, newPassword: string) => Promise<void>;
-  parseCabinet: (pageType: 'profile' | 'timetable', rawText: string) => Promise<any>;
+  parseCabinet: (pageType: CabinetPageType, rawText: string) => Promise<any>;
   nstuLogin: (email: string) => Promise<void>;
   setPassword: (newPassword: string) => Promise<void>;
+  markLastSync: () => Promise<void>;
 }
 
 // ── Context setup ──────────────────────────────────────────────────────────────
@@ -56,7 +67,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [autoSyncVisible, setAutoSyncVisible] = useState(false);
   const tokenRef = React.useRef<string | null>(null);
+  const dailySyncChecked = React.useRef(false);
 
   useEffect(() => {
     loadStoredData();
@@ -178,6 +192,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = async () => {
     tokenRef.current = null;
+    dailySyncChecked.current = false;
+    setAutoSyncVisible(false);
+    setSyncStatus('idle');
     setUser(null);
     setToken(null);
     await AsyncStorage.removeItem('@auth_token');
@@ -293,7 +310,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const parseCabinet = async (pageType: 'profile' | 'timetable', rawText: string) => {
+  const parseCabinet = async (pageType: CabinetPageType, rawText: string) => {
     const authToken = tokenRef.current;
     if (!authToken) throw new Error('Вы не авторизованы');
     const response = await fetch(`${API_URL}/sync/parse-cabinet`, {
@@ -323,6 +340,49 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return data;
   };
 
+  const markLastSync = async () => {
+    await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
+  };
+
+  const startAutoSync = () => {
+    if (autoSyncVisible) return;
+    setSyncStatus('syncing');
+    setAutoSyncVisible(true);
+  };
+
+  const maybeStartDailySync = async (currentUser: User) => {
+    if (dailySyncChecked.current) return;
+    dailySyncChecked.current = true;
+    try {
+      const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
+      const lastTs = raw ? Number(raw) : 0;
+      const overdue = lastTs > 0 && Date.now() - lastTs >= SYNC_INTERVAL_MS;
+      const neverSyncedButCabinetLinked =
+        !lastTs && !!currentUser.is_synced_with_nstu;
+      if (overdue || neverSyncedButCabinetLinked) {
+        startAutoSync();
+      }
+    } catch {
+      // Keep idle if storage is unavailable
+    }
+  };
+
+  useEffect(() => {
+    if (isLoading || !user) return;
+    maybeStartDailySync(user);
+  }, [isLoading, user]);
+
+  const handleAutoSyncFinished = async () => {
+    await markLastSync();
+    setAutoSyncVisible(false);
+    setSyncStatus('success');
+  };
+
+  const handleAutoSyncAuthError = () => {
+    setAutoSyncVisible(false);
+    setSyncStatus('error_auth');
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -330,6 +390,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         token,
         isLoading,
         isAuthenticated: !!user,
+        syncStatus,
         login,
         verifyLogin,
         requestRegisterCode,
@@ -342,9 +403,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         parseCabinet,
         nstuLogin,
         setPassword,
+        markLastSync,
       }}
     >
       {children}
+      <NstuImportModal
+        visible={autoSyncVisible}
+        mode="auto-sync"
+        onClose={handleAutoSyncAuthError}
+        onScraped={parseCabinet}
+        onFinished={handleAutoSyncFinished}
+        onAuthError={handleAutoSyncAuthError}
+      />
     </AuthContext.Provider>
   );
 };

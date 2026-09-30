@@ -51,6 +51,7 @@ const AuthScreen = () => {
     isAuthenticated,
     nstuLogin,
     parseCabinet,
+    markLastSync,
   } = useAuth();
   const router = useRouter();
 
@@ -462,7 +463,10 @@ const AuthScreen = () => {
         onClose={() => setIsWebViewVisible(false)}
         onNstuLogin={nstuLogin}
         onScraped={parseCabinet}
-        onFinished={() => setIsWebViewVisible(false)}
+        onFinished={() => {
+          setIsWebViewVisible(false);
+          markLastSync().catch(() => {});
+        }}
       />
     </ScreenWrapper>
   );
