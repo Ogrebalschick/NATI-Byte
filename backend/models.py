@@ -144,6 +144,10 @@ class NoteResponse(BaseModel):
 
 # ── AI memory / digital footprint ─────────────────────────────────────────────
 
+class UserFactUpdate(BaseModel):
+    fact_text: str
+
+
 class UserFactsCreate(BaseModel):
     """Facts extracted from a chat reply. `source` is one of cabinet|chat|notes|grades."""
     facts: List[str]

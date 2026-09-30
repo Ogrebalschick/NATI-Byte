@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from auth import decode_token, oauth2_scheme
 from database import User, UserFact, get_db
-from models import UserFactsCreate, UserFactsGroupedResponse
+from models import UserFactUpdate, UserFactsCreate, UserFactsGroupedResponse
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -184,6 +184,31 @@ def create_facts(
         db.rollback()
         raise HTTPException(status_code=500, detail="Не удалось сохранить факты") from exc
     return {"created": [_fact_to_dict(row) for row in created]}
+
+
+@router.put("/facts/{fact_id}")
+def update_fact(
+    fact_id: int,
+    data: UserFactUpdate,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Replace the text of one fact owned by the current user."""
+    user = _current_user(token, db)
+    fact = _owned_fact(db, user, fact_id)
+    text = (data.fact_text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Текст факта не должен быть пустым")
+    if len(text) > MAX_FACT_LENGTH:
+        text = text[:MAX_FACT_LENGTH].rstrip()
+    try:
+        fact.fact_text = text
+        db.commit()
+        db.refresh(fact)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Не удалось обновить факт") from exc
+    return _fact_to_dict(fact)
 
 
 @router.delete("/facts/all")

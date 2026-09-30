@@ -161,6 +161,21 @@ export async function createChatFacts(token: string, facts: string[]): Promise<s
     .filter(Boolean);
 }
 
+export async function updateFact(token: string, factId: number, factText: string): Promise<UserFact> {
+  const response = await fetch(`${API_URL}/profile/facts/${factId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ fact_text: factText }),
+  });
+  if (!response.ok) throw new Error(await readError(response, 'Не удалось обновить факт'));
+  const row = normalizeFact(await response.json());
+  if (!row) throw new Error('Не удалось обновить факт');
+  return row;
+}
+
 export async function deleteFact(token: string, factId: number): Promise<void> {
   const response = await fetch(`${API_URL}/profile/facts/${factId}`, {
     method: 'DELETE',

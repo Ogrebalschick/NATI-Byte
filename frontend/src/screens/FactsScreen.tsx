@@ -12,8 +12,9 @@ import {
 } from 'react-native';
 import Animated, { FadeOut, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { deleteAllFacts, deleteFact, fetchFactGroups, type FactGroups, type UserFact } from '../api/factsApi';
+import { deleteAllFacts, deleteFact, fetchFactGroups, updateFact, type FactGroups, type UserFact } from '../api/factsApi';
 import { ScreenWrapper } from '../components/ScreenWrapper';
+import { FactSwipeDeck, type SwipeDirection } from '../components/facts/FactSwipeDeck';
 import { useAuth } from '../context/AuthContext';
 
 const SOURCE_ORDER = ['cabinet', 'chat', 'notes', 'grades'] as const;
@@ -27,6 +28,18 @@ const SOURCE_LABEL: Record<string, { title: string; icon: keyof typeof Ionicons.
 
 function sourceMeta(source: string) {
   return SOURCE_LABEL[source] ?? { title: source || 'Другое', icon: 'ellipse-outline' as const };
+}
+
+function flattenFacts(groups: FactGroups): UserFact[] {
+  return orderedSources(groups).flatMap(source => groups[source] ?? []);
+}
+
+function withUpdatedFact(groups: FactGroups, factId: number, factText: string): FactGroups {
+  const next: FactGroups = {};
+  for (const [source, items] of Object.entries(groups)) {
+    next[source] = items.map(item => (item.id === factId ? { ...item, fact_text: factText } : item));
+  }
+  return next;
 }
 
 function withoutFact(groups: FactGroups, factId: number): FactGroups {
@@ -101,10 +114,17 @@ const FactsList = ({ token }: { token: string }) => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
+  const { confirmProfileReview } = useAuth();
   const [groups, setGroups] = useState<FactGroups>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [wiping, setWiping] = useState(false);
+  const [mode, setMode] = useState<'list' | 'game'>('list');
+  const [deck, setDeck] = useState<UserFact[]>([]);
+  const [gameDone, setGameDone] = useState(false);
+  const [editing, setEditing] = useState<UserFact | null>(null);
+  const [settling, setSettling] = useState(false);
+  const deckRef = React.useRef<UserFact[]>([]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -161,6 +181,67 @@ const FactsList = ({ token }: { token: string }) => {
     }
   };
 
+  const replaceDeck = (next: UserFact[]) => {
+    deckRef.current = next;
+    setDeck(next);
+  };
+
+  const finishReview = async () => {
+    setGameDone(true);
+    try {
+      await confirmProfileReview();
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось сохранить отметку. Попробуйте ещё раз.');
+    }
+  };
+
+  const openGame = () => {
+    replaceDeck(flattenFacts(groups));
+    setGameDone(false);
+    setEditing(null);
+    setMode('game');
+  };
+
+  const handleSwipe = (fact: UserFact, direction: SwipeDirection) => {
+    const next = deckRef.current.filter(item => item.id !== fact.id);
+    replaceDeck(next);
+    if (direction === 'up') {
+      setEditing(fact);
+      return;
+    }
+    if (direction === 'right') {
+      if (next.length === 0) void finishReview();
+      return;
+    }
+    if (next.length === 0) setSettling(true);
+    deleteFact(token, fact.id)
+      .then(() => {
+        setGroups(current => withoutFact(current, fact.id));
+        setSettling(false);
+        if (deckRef.current.length === 0) void finishReview();
+      })
+      .catch(err => {
+        setSettling(false);
+        Alert.alert('Ошибка', err instanceof Error ? err.message : 'Не удалось удалить факт');
+        replaceDeck([fact, ...deckRef.current.filter(item => item.id !== fact.id)]);
+      });
+  };
+
+  const handleSaveEdit = async (fact: UserFact, text: string) => {
+    if (text !== fact.fact_text) {
+      const updated = await updateFact(token, fact.id, text);
+      setGroups(current => withUpdatedFact(current, updated.id, updated.fact_text));
+    }
+    setEditing(null);
+    if (deckRef.current.length === 0) await finishReview();
+  };
+
+  const handleCancelEdit = (fact: UserFact) => {
+    setEditing(null);
+    if (deckRef.current.some(item => item.id === fact.id)) return;
+    replaceDeck([fact, ...deckRef.current]);
+  };
+
   const confirmWipe = () => {
     Alert.alert(
       'Забыть всё',
@@ -172,15 +253,8 @@ const FactsList = ({ token }: { token: string }) => {
     );
   };
 
-  return (
-    <Animated.ScrollView
-      style={styles.flex}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + 8, paddingBottom: tabBarHeight + 28 },
-      ]}
-      showsVerticalScrollIndicator={false}
-    >
+  const header = (
+    <>
       <TouchableOpacity
         style={styles.backRow}
         onPress={() => router.back()}
@@ -193,6 +267,55 @@ const FactsList = ({ token }: { token: string }) => {
 
       <Text style={styles.title}>Память ИИ</Text>
       <Text style={styles.subtitle}>Что BYTE знает о вас. Любой факт можно стереть.</Text>
+
+      <View style={styles.modeSwitch}>
+        <TouchableOpacity
+          style={[styles.modeButton, mode === 'list' && styles.modeButtonOn]}
+          onPress={() => setMode('list')}
+          accessibilityRole="button"
+        >
+          <Text style={[styles.modeText, mode === 'list' && styles.modeTextOn]}>Обычный список</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modeButton, mode === 'game' && styles.modeButtonOn]}
+          onPress={() => {
+            if (mode !== 'game' && !loading) openGame();
+          }}
+          accessibilityRole="button"
+        >
+          <Text style={[styles.modeText, mode === 'game' && styles.modeTextOn]}>Игровой режим 🎮</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  if (mode === 'game') {
+    return (
+      <View style={[styles.flex, styles.content, { paddingTop: insets.top + 8, paddingBottom: tabBarHeight }]}>
+        {header}
+        <FactSwipeDeck
+          deck={deck}
+          done={gameDone}
+          settling={settling}
+          editing={editing}
+          onSwipe={handleSwipe}
+          onSaveEdit={handleSaveEdit}
+          onCancelEdit={handleCancelEdit}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <Animated.ScrollView
+      style={styles.flex}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + 8, paddingBottom: tabBarHeight + 28 },
+      ]}
+      showsVerticalScrollIndicator={false}
+    >
+      {header}
 
       {total > 0 && (
         <TouchableOpacity
@@ -283,7 +406,18 @@ const styles = StyleSheet.create({
   backRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 6 },
   backText: { color: '#0A84FF', fontSize: 17, marginLeft: 2 },
   title: { color: '#fff', fontSize: 28, fontWeight: '700', marginTop: 12 },
-  subtitle: { color: '#8e8e93', fontSize: 15, lineHeight: 21, marginTop: 6, marginBottom: 18 },
+  subtitle: { color: '#8e8e93', fontSize: 15, lineHeight: 21, marginTop: 6, marginBottom: 14 },
+  modeSwitch: {
+    flexDirection: 'row',
+    backgroundColor: '#1C1C1E',
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 16,
+  },
+  modeButton: { flex: 1, borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
+  modeButtonOn: { backgroundColor: '#2C2D2E' },
+  modeText: { color: '#8e8e93', fontSize: 13, fontWeight: '600' },
+  modeTextOn: { color: '#fff' },
   forgetButton: {
     flexDirection: 'row',
     alignItems: 'center',
