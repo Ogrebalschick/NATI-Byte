@@ -66,7 +66,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     # Check if user already exists
     existing = db.query(User).filter(User.email == user_data.email).first()
     if existing:
-        raise HTTPException(status_code=400, detail="User already exists")
+        raise HTTPException(status_code=400, detail="Пользователь с такой почтой уже зарегистрирован")
 
     # Create new user with hashed password
     hashed = get_password_hash(user_data.password)

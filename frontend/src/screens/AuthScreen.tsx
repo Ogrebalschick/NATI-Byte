@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,8 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
@@ -23,41 +23,56 @@ const AuthScreen = () => {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Password visibility toggles (separate for each field)
+  // Inline error message — replaces Alert.alert()
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Password visibility toggles (separate per field)
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
 
-  const { login, register } = useAuth();
+  const { login, register, isAuthenticated } = useAuth();
+  const router = useRouter();
 
-  // Reset form state when switching between login and register
+  // Auto-redirect: as soon as auth state flips to true, pop back to profile
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.back();
+    }
+  }, [isAuthenticated]);
+
+  // Reset form when switching between login and register modes
   const handleSwitchMode = () => {
-    setIsLogin(!isLogin);
+    setIsLogin(prev => !prev);
     setPassword('');
     setConfirmPassword('');
+    setErrorMessage(null);
     setIsPasswordVisible(false);
     setIsConfirmPasswordVisible(false);
   };
 
+  const showError = (msg: string) => setErrorMessage(msg);
+
   const handleSubmit = async () => {
-    // Basic field validation
+    setErrorMessage(null);
+
+    // Client-side validation
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Ошибка', 'Заполните все поля');
+      showError('Заполните все поля');
       return;
     }
 
     if (!isLogin && !name.trim()) {
-      Alert.alert('Ошибка', 'Введите ваше имя');
+      showError('Введите ваше имя');
       return;
     }
 
     if (!isLogin && !email.endsWith('@stud.nstu.ru')) {
-      Alert.alert('Ошибка', 'Только почта @stud.nstu.ru разрешена для регистрации');
+      showError('Только почта @stud.nstu.ru разрешена для регистрации');
       return;
     }
 
-    // Password confirmation check (registration only)
     if (!isLogin && password !== confirmPassword) {
-      Alert.alert('Ошибка', 'Пароли не совпадают');
+      showError('Пароли не совпадают');
       return;
     }
 
@@ -68,8 +83,9 @@ const AuthScreen = () => {
       } else {
         await register(email.trim(), password.trim(), name.trim());
       }
+      // On success isAuthenticated flips → useEffect triggers router.back()
     } catch (error: any) {
-      Alert.alert('Ошибка', error.message || 'Что-то пошло не так');
+      showError(error.message || 'Что-то пошло не так. Попробуйте снова.');
     } finally {
       setLoading(false);
     }
@@ -81,7 +97,11 @@ const AuthScreen = () => {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* ── Header ── */}
           <View style={styles.header}>
             <Text style={styles.title}>🤖 Байт</Text>
             <Text style={styles.subtitle}>
@@ -90,7 +110,7 @@ const AuthScreen = () => {
           </View>
 
           <View style={styles.form}>
-            {/* Name field — register only */}
+            {/* Name — register only */}
             {!isLogin && (
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Имя</Text>
@@ -99,12 +119,12 @@ const AuthScreen = () => {
                   placeholder="Ваше имя"
                   placeholderTextColor="#8e8e93"
                   value={name}
-                  onChangeText={setName}
+                  onChangeText={text => { setName(text); setErrorMessage(null); }}
                 />
               </View>
             )}
 
-            {/* Email field */}
+            {/* Email */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email</Text>
               <TextInput
@@ -112,7 +132,7 @@ const AuthScreen = () => {
                 placeholder="email@stud.nstu.ru"
                 placeholderTextColor="#8e8e93"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={text => { setEmail(text); setErrorMessage(null); }}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -122,7 +142,7 @@ const AuthScreen = () => {
               )}
             </View>
 
-            {/* Password field with eye toggle */}
+            {/* Password with eye toggle */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Пароль</Text>
               <View style={styles.passwordWrapper}>
@@ -131,7 +151,7 @@ const AuthScreen = () => {
                   placeholder="Минимум 6 символов"
                   placeholderTextColor="#8e8e93"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={text => { setPassword(text); setErrorMessage(null); }}
                   secureTextEntry={!isPasswordVisible}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -159,7 +179,7 @@ const AuthScreen = () => {
                     placeholder="Повторите пароль"
                     placeholderTextColor="#8e8e93"
                     value={confirmPassword}
-                    onChangeText={setConfirmPassword}
+                    onChangeText={text => { setConfirmPassword(text); setErrorMessage(null); }}
                     secureTextEntry={!isConfirmPasswordVisible}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -175,13 +195,21 @@ const AuthScreen = () => {
                     }
                   </TouchableOpacity>
                 </View>
-                {/* Inline mismatch hint */}
+                {/* Live mismatch hint while typing */}
                 {confirmPassword.length > 0 && password !== confirmPassword && (
-                  <Text style={styles.errorHint}>Пароли не совпадают</Text>
+                  <Text style={styles.fieldError}>Пароли не совпадают</Text>
                 )}
               </View>
             )}
 
+            {/* ── Inline error banner ── */}
+            {errorMessage && (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorBannerText}>{errorMessage}</Text>
+              </View>
+            )}
+
+            {/* Submit */}
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleSubmit}
@@ -196,10 +224,8 @@ const AuthScreen = () => {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.switchButton}
-              onPress={handleSwitchMode}
-            >
+            {/* Switch mode */}
+            <TouchableOpacity style={styles.switchButton} onPress={handleSwitchMode}>
               <Text style={styles.switchText}>
                 {isLogin
                   ? 'Нет аккаунта? Зарегистрируйтесь'
@@ -259,7 +285,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2C2D2E',
   },
-  // Password field: row with input + eye icon
+  // Password row: input + eye button
   passwordWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -285,17 +311,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  errorHint: {
+  // Small red text under confirm-password while typing
+  fieldError: {
     color: '#FF453A',
     fontSize: 12,
     marginTop: 4,
+  },
+  // Full-width error banner shown above the submit button
+  errorBanner: {
+    backgroundColor: 'rgba(255, 69, 58, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.35)',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  errorBannerText: {
+    color: '#FF453A',
+    fontSize: 14,
+    lineHeight: 20,
   },
   button: {
     backgroundColor: '#007AFF',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 4,
   },
   buttonDisabled: {
     opacity: 0.6,

@@ -57,7 +57,7 @@ const GuestProfile = () => {
       <TouchableOpacity
         style={styles.signInButton}
         activeOpacity={0.8}
-        onPress={() => router.push('/auth')}
+        onPress={() => router.push('/profile/auth')}
       >
         <Ionicons name="log-in-outline" size={20} color="#fff" style={styles.signInIcon} />
         <Text style={styles.signInText}>Войти в аккаунт</Text>
