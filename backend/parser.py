@@ -25,7 +25,17 @@ load_dotenv()
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
-ALLOWED_PAGE_TYPES = {"profile", "timetable"}
+ALLOWED_PAGE_TYPES = {
+    "profile",
+    "timetable",
+    "progress",
+    "task",
+    "kp_rgz_praktiki",
+    "academic_backlog",
+    "individual_progress",
+    "timetable_consult",
+    "timetable_session",
+}
 
 _giga = GigaChat(
     credentials=os.getenv("GIGACHAT_CREDENTIALS"),
@@ -90,6 +100,185 @@ Rules:
 - Never invent lessons that are not in the raw text.
 - Output encoding: UTF-8 JSON.
 """
+
+PROGRESS_SYSTEM_PROMPT = """You are a strict data extractor for NSTU student cabinet pages (ciu.nstu.ru).
+The user message contains raw visible text copied from a PROGRESS / grades page
+(успеваемость, контрольные недели, зачётная книжка).
+
+Return ONLY valid JSON. No markdown, no comments, no extra keys.
+If there are no subjects, return {"subjects": []}.
+
+Required JSON shape:
+{
+  "semester": string | null,
+  "control_week": string | null,
+  "subjects": [
+    {
+      "name": string,
+      "control_type": string | null,
+      "grade": string | null,
+      "points": number | null,
+      "teacher": string | null,
+      "attestation": string | null
+    }
+  ]
+}
+
+Rules:
+- control_type is экзамен / зачёт / дифференцированный зачёт / курсовая / КП / РГЗ when present.
+- grade is the textual mark (отлично, хорошо, зачтено, 5, н/я, ...) when present.
+- points is a numeric score when present, otherwise null.
+- Never invent grades that are not in the raw text.
+- Output encoding: UTF-8 JSON.
+"""
+
+TASK_SYSTEM_PROMPT = """You are a strict data extractor for NSTU student cabinet pages (ciu.nstu.ru).
+The user message contains raw visible text copied from a TASKS page
+(текущие задания, РГЗ, КП, практики).
+
+Return ONLY valid JSON. No markdown, no comments, no extra keys.
+If there are no tasks, return {"tasks": []}.
+
+Required JSON shape:
+{
+  "tasks": [
+    {
+      "subject": string,
+      "title": string | null,
+      "task_type": string | null,
+      "deadline": string | null,
+      "status": string | null,
+      "teacher": string | null,
+      "comment": string | null
+    }
+  ]
+}
+
+Rules:
+- task_type is РГЗ / КП / практика / домашнее задание / лабораторная when present.
+- status is сдано / не сдано / на проверке / просрочено when present.
+- Never invent tasks that are not in the raw text.
+- Output encoding: UTF-8 JSON.
+"""
+
+ACADEMIC_BACKLOG_SYSTEM_PROMPT = """You are a strict data extractor for NSTU student cabinet pages (ciu.nstu.ru).
+The user message contains raw visible text copied from an ACADEMIC BACKLOG page
+(академические задолженности, «хвосты»).
+
+Return ONLY valid JSON. No markdown, no comments, no extra keys.
+If there are no backlogs, return {"backlogs": []}.
+
+Required JSON shape:
+{
+  "backlogs": [
+    {
+      "subject": string,
+      "teacher": string | null,
+      "control_type": string | null,
+      "status": string | null,
+      "deadline": string | null,
+      "semester": string | null
+    }
+  ]
+}
+
+Rules:
+- status is не сдано / к пересдаче / ликвидировано when present.
+- Never invent backlogs that are not in the raw text.
+- Output encoding: UTF-8 JSON.
+"""
+
+INDIVIDUAL_PROGRESS_SYSTEM_PROMPT = """You are a strict data extractor for NSTU student cabinet pages (ciu.nstu.ru).
+The user message contains raw visible text copied from an INDIVIDUAL PROGRESS /
+achievements page (индивидуальные достижения студента).
+
+Return ONLY valid JSON. No markdown, no comments, no extra keys.
+If there are no achievements, return {"achievements": []}.
+
+Required JSON shape:
+{
+  "achievements": [
+    {
+      "title": string,
+      "category": string | null,
+      "date": string | null,
+      "level": string | null,
+      "result": string | null,
+      "document": string | null
+    }
+  ]
+}
+
+Rules:
+- category is олимпиада / конференция / спорт / волонтёрство / публикация when present.
+- Never invent achievements that are not in the raw text.
+- Output encoding: UTF-8 JSON.
+"""
+
+TIMETABLE_SESSION_SYSTEM_PROMPT = """You are a strict data extractor for NSTU student cabinet pages (ciu.nstu.ru).
+The user message contains raw visible text copied from an EXAM SESSION timetable
+(расписание экзаменов / сессии).
+
+Return ONLY valid JSON. No markdown, no comments, no extra keys.
+If there are no exams, return {"exams": []}.
+
+Required JSON shape:
+{
+  "exams": [
+    {
+      "subject": string,
+      "date": string | null,
+      "time": string | null,
+      "room": string | null,
+      "teacher": string | null,
+      "control_type": string | null
+    }
+  ]
+}
+
+Rules:
+- control_type is экзамен / зачёт / консультация when present in this table.
+- Never invent exams that are not in the raw text.
+- Output encoding: UTF-8 JSON.
+"""
+
+TIMETABLE_CONSULT_SYSTEM_PROMPT = """You are a strict data extractor for NSTU student cabinet pages (ciu.nstu.ru).
+The user message contains raw visible text copied from a CONSULTATIONS timetable
+(расписание консультаций).
+
+Return ONLY valid JSON. No markdown, no comments, no extra keys.
+If there are no consultations, return {"consultations": []}.
+
+Required JSON shape:
+{
+  "consultations": [
+    {
+      "subject": string,
+      "date": string | null,
+      "time": string | null,
+      "room": string | null,
+      "teacher": string | null
+    }
+  ]
+}
+
+Rules:
+- Never invent consultations that are not in the raw text.
+- Output encoding: UTF-8 JSON.
+"""
+
+# page_type -> GigaChat system prompt (profile/timetable keep their original constants)
+PAGE_TYPE_PROMPTS: dict[str, str] = {
+    "profile": PROFILE_SYSTEM_PROMPT,
+    "timetable": TIMETABLE_SYSTEM_PROMPT,
+    "progress": PROGRESS_SYSTEM_PROMPT,
+    "task": TASK_SYSTEM_PROMPT,
+    "kp_rgz_praktiki": TASK_SYSTEM_PROMPT,
+    "academic_backlog": ACADEMIC_BACKLOG_SYSTEM_PROMPT,
+    "individual_progress": INDIVIDUAL_PROGRESS_SYSTEM_PROMPT,
+    "timetable_consult": TIMETABLE_CONSULT_SYSTEM_PROMPT,
+    "timetable_session": TIMETABLE_SESSION_SYSTEM_PROMPT,
+}
 
 
 def _extract_json(text: str) -> dict:
@@ -174,7 +363,7 @@ def parse_cabinet(
     if page_type not in ALLOWED_PAGE_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="page_type должен быть 'profile' или 'timetable'",
+            detail="Недопустимый page_type",
         )
     if not data.raw_text or not data.raw_text.strip():
         raise HTTPException(status_code=400, detail="raw_text не должен быть пустым")
@@ -186,7 +375,9 @@ def parse_cabinet(
 
     print(f"[SYNC] Parsing {page_type} for user_id={user.id}")
 
-    system_prompt = PROFILE_SYSTEM_PROMPT if page_type == "profile" else TIMETABLE_SYSTEM_PROMPT
+    system_prompt = PAGE_TYPE_PROMPTS.get(page_type)
+    if not system_prompt:
+        raise HTTPException(status_code=400, detail="Недопустимый page_type")
     parsed = _ask_gigachat(system_prompt, data.raw_text)
 
     try:
