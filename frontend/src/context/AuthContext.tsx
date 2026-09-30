@@ -13,6 +13,13 @@ export type SyncStatus = 'idle' | 'syncing' | 'error_auth' | 'success';
 const LAST_SYNC_KEY = '@last_sync_date';
 const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+export type StudentDataSnapshot = {
+  payload: Record<string, unknown>;
+  updated_at: string | null;
+};
+
+export type StudentDataMap = Record<string, StudentDataSnapshot>;
+
 interface User {
   id: number;
   email: string;
@@ -50,8 +57,9 @@ interface AuthContextType {
   nstuLogin: (email: string) => Promise<void>;
   setPassword: (newPassword: string) => Promise<void>;
   markLastSync: () => Promise<void>;
+  getStudentData: (types?: string[]) => Promise<StudentDataMap>;
+  dismissSyncStatus: () => void;
 }
-
 // ── Context setup ──────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -344,6 +352,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
   };
 
+  const dismissSyncStatus = () => {
+    setSyncStatus('idle');
+  };
+
+  const getStudentData = React.useCallback(async (types?: string[]): Promise<StudentDataMap> => {
+    const authToken = tokenRef.current;
+    if (!authToken) throw new Error('Вы не авторизованы');
+    const query = types?.length ? `?types=${encodeURIComponent(types.join(','))}` : '';
+    const response = await fetch(`${API_URL}/sync/student-data${query}`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Не удалось загрузить данные статистики');
+    }
+    const data = await response.json();
+    return (data.items || {}) as StudentDataMap;
+  }, []);
+
   const startAutoSync = () => {
     if (autoSyncVisible) return;
     setSyncStatus('syncing');
@@ -404,6 +431,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         nstuLogin,
         setPassword,
         markLastSync,
+        getStudentData,
+        dismissSyncStatus,
       }}
     >
       {children}

@@ -389,6 +389,7 @@ export const NstuImportModal = ({
       ref={webRef}
       source={{ uri: NSTU_HOME }}
       style={isAuto ? styles.hiddenWebview : styles.webview}
+      pointerEvents={isAuto ? 'none' : 'auto'}
       originWhitelist={['*']}
       javaScriptEnabled
       domStorageEnabled
@@ -418,12 +419,13 @@ export const NstuImportModal = ({
   );
 
   if (isAuto) {
+    if (!visible) return null;
+    // Off-screen View (not Modal): Modal captures the whole window and blocks taps.
+    // Keep a real WebView viewport so Chromium still loads pages and runs JS.
     return (
-      <Modal visible={visible} transparent animationType="none" hardwareAccelerated>
-        <View style={styles.offscreen} pointerEvents="none">
-          {webView}
-        </View>
-      </Modal>
+      <View pointerEvents="none" collapsable={false} style={styles.offscreen}>
+        {webView}
+      </View>
     );
   }
 
@@ -484,12 +486,19 @@ const styles = StyleSheet.create({
   webview: { flex: 1, backgroundColor: '#fff' },
   offscreen: {
     position: 'absolute',
-    left: -480,
-    top: 0,
+    left: -9999,
+    top: -9999,
     width: 360,
     height: 640,
-    opacity: 0.01,
     overflow: 'hidden',
+    backgroundColor: 'transparent',
+    zIndex: -1,
+    elevation: 0,
   },
-  hiddenWebview: { width: 360, height: 640, backgroundColor: '#fff' },
+  hiddenWebview: {
+    width: 360,
+    height: 640,
+    backgroundColor: 'transparent',
+    opacity: 1,
+  },
 });

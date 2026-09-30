@@ -9,6 +9,7 @@ import { Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import * as NavigationBar from 'expo-navigation-bar';
 import { AuthProvider } from '../context/AuthContext';
+import { SyncStatusBanner } from '../components/SyncStatusBanner';
 
 export default function RootLayout() {
   useEffect(() => {
@@ -30,6 +31,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="auth" />
       </Stack>
+      <SyncStatusBanner />
     </AuthProvider>
   );
 }

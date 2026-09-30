@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_gigachat import GigaChat
 from sqlalchemy.orm import Session
@@ -409,3 +409,43 @@ def parse_cabinet(
         "full_name": user.full_name,
         "student_group": user.student_group,
     }
+
+
+def _iso_dt(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return value.isoformat() + "Z"
+    except Exception:
+        return str(value)
+
+
+@router.get("/student-data")
+def get_student_data(
+    types: str | None = Query(None, description="Comma-separated data_type filters"),
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Return stored cabinet JSON snapshots for the current user."""
+    payload = decode_token(token)
+    user = db.query(User).filter(User.id == payload["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    requested = [t.strip().lower() for t in (types or "").split(",") if t.strip()]
+    query = db.query(StudentData).filter(StudentData.user_id == user.id)
+    if requested:
+        unknown = [t for t in requested if t not in ALLOWED_PAGE_TYPES]
+        if unknown:
+            raise HTTPException(status_code=400, detail="Недопустимый data_type")
+        query = query.filter(StudentData.data_type.in_(requested))
+
+    items = {}
+    for row in query.all():
+        items[row.data_type] = {
+            "payload": row.payload or {},
+            "updated_at": _iso_dt(row.updated_at),
+        }
+    return {"items": items}
