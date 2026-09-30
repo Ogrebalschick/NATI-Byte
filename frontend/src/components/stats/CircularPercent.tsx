@@ -2,26 +2,32 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
-interface CircularGpaProps {
-  value: number | null;
+interface CircularPercentProps {
+  percent: number;
   size?: number;
   stroke?: number;
+  caption?: string;
 }
 
-function ringColor(gpa: number | null): string {
-  if (gpa == null) return '#3A3A3C';
-  if (gpa >= 4.5) return '#30D158';
-  if (gpa >= 3.5) return '#0A84FF';
-  if (gpa >= 3) return '#FFD60A';
-  return '#FF453A';
+function ringColor(percent: number): string {
+  if (percent >= 70) return '#30D158';
+  if (percent >= 35) return '#0A84FF';
+  if (percent > 0) return '#64D2FF';
+  return '#3A3A3C';
 }
 
-export const CircularGpa = ({ value, size = 168, stroke = 12 }: CircularGpaProps) => {
+export const CircularPercent = ({
+  percent,
+  size = 176,
+  stroke = 14,
+  caption = 'Общая успеваемость',
+}: CircularPercentProps) => {
+  const safe = Number.isFinite(percent) ? Math.max(0, percent) : 0;
+  const ratio = Math.max(0, Math.min(safe / 100, 1));
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const ratio = value == null ? 0 : Math.max(0, Math.min(value / 5, 1));
   const offset = c * (1 - ratio);
-  const color = ringColor(value);
+  const color = ringColor(safe);
 
   return (
     <View style={[styles.wrap, { width: size, height: size }]}>
@@ -49,10 +55,8 @@ export const CircularGpa = ({ value, size = 168, stroke = 12 }: CircularGpaProps
         </G>
       </Svg>
       <View style={styles.label} pointerEvents="none">
-        <Text style={[styles.value, { color }]}>{value == null ? '—' : value.toFixed(1)}</Text>
-        <Text style={styles.caption}>
-          {value == null ? 'из 5.0' : `из 5.0 (${Math.round((value / 5) * 100)}%)`}
-        </Text>
+        <Text style={[styles.value, { color }]}>{Math.round(safe)}%</Text>
+        {!!caption && <Text style={styles.caption}>{caption}</Text>}
       </View>
     </View>
   );
@@ -66,5 +70,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   value: { fontSize: 40, fontWeight: '800', letterSpacing: -1 },
-  caption: { marginTop: 2, fontSize: 12, color: '#8E8E93', fontWeight: '600' },
+  caption: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#8E8E93',
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
 });

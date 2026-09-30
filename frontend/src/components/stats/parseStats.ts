@@ -151,7 +151,7 @@ export function deriveControlWeeks(
     const week = parseControlWeekLabel(payload);
     return [
       {
-        label: week ? `Контрольная неделя ${week}` : 'Аттестация',
+        label: week ? `Аттестовано на КН ${week}` : 'Аттестовано предметов',
         value: attested,
         max: subjects.length,
       },

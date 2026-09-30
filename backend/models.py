@@ -82,6 +82,39 @@ class SetPasswordRequest(BaseModel):
     new_password: str
 
 
+# ── Manual subject score tracking ─────────────────────────────────────────────
+
+class CustomSubjectCreate(BaseModel):
+    name: str
+    max_score: float
+    target_score: float
+    is_custom: bool = True
+
+
+class ScoreLogCreate(BaseModel):
+    score: float
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class ScoreLogResponse(BaseModel):
+    id: int
+    subject_id: int
+    score: float
+    description: Optional[str] = None
+    created_at: datetime
+
+
+class CustomSubjectResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    max_score: float
+    target_score: float
+    is_custom: bool
+    scores: List[ScoreLogResponse] = []
+
+
 # Kept for backward-compat (internal use)
 class UserCreate(BaseModel):
     email: EmailStr

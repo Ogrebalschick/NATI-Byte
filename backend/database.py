@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, JSON, ForeignKey, Boolean, text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, JSON, ForeignKey, Boolean, Float, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy import inspect as sa_inspect
@@ -23,9 +23,10 @@ class User(Base):
     full_name = Column(String, nullable=True)
     student_group = Column(String, nullable=True)
     is_synced_with_nstu = Column(Boolean, default=False)
-    # cascade="all, delete-orphan" ensures chats / student data are deleted with the user
+    # cascade="all, delete-orphan" ensures chats / student data / subjects are deleted with the user
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
     student_data = relationship("StudentData", back_populates="user", cascade="all, delete-orphan")
+    custom_subjects = relationship("CustomSubject", back_populates="user", cascade="all, delete-orphan")
 
 
 class Chat(Base):
@@ -52,8 +53,37 @@ class StudentData(Base):
     user = relationship("User", back_populates="student_data")
 
 
+class CustomSubject(Base):
+    """Student-defined course used for manual score tracking."""
+    __tablename__ = "custom_subjects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    name = Column(String, nullable=False)
+    max_score = Column(Float, nullable=False)
+    target_score = Column(Float, nullable=False)
+    is_custom = Column(Boolean, default=True, nullable=False)
+    user = relationship("User", back_populates="custom_subjects")
+    scores = relationship("ScoreLog", back_populates="subject", cascade="all, delete-orphan")
+
+
+class ScoreLog(Base):
+    """One manual score entry attached to a custom subject."""
+    __tablename__ = "score_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subject_id = Column(Integer, ForeignKey("custom_subjects.id"), index=True, nullable=False)
+    score = Column(Float, nullable=False)
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    subject = relationship("CustomSubject", back_populates="scores")
+
+
 def _run_migrations() -> None:
-    """Lightweight schema migration: add any missing columns to existing tables."""
+    """Lightweight schema migration: create missing tables and add missing columns."""
+    # create_all is idempotent and will add new tables without dropping existing data.
+    Base.metadata.create_all(bind=engine)
+
     with engine.connect() as conn:
         inspector = sa_inspect(engine)
 
@@ -69,6 +99,18 @@ def _run_migrations() -> None:
                 conn.execute(text(ddl))
                 conn.commit()
                 print(f"[DB] Added missing column users.{col_name}")
+
+        tables = inspector.get_table_names()
+        if "custom_subjects" in tables:
+            subject_cols = [c["name"] for c in inspector.get_columns("custom_subjects")]
+            subject_patches = {
+                "is_custom": "ALTER TABLE custom_subjects ADD COLUMN is_custom BOOLEAN DEFAULT 1",
+            }
+            for col_name, ddl in subject_patches.items():
+                if col_name not in subject_cols:
+                    conn.execute(text(ddl))
+                    conn.commit()
+                    print(f"[DB] Added missing column custom_subjects.{col_name}")
 
 
 # Create all tables (no-op if they already exist) then patch any missing columns
