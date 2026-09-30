@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 import jwt
@@ -13,10 +14,22 @@ load_dotenv()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# --- Security setup ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-me")
+
+# SECRET_KEY must be set in .env — no insecure fallback
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY is not set in .env. Server cannot start without it.")
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 дней
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+
+# OAuth2 scheme: expects "Authorization: Bearer <token>" header
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
+
+# --- Helpers ---
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -24,13 +37,13 @@ def get_password_hash(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-def create_access_token(data: dict):
+def create_access_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def decode_token(token: str):
+def decode_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
@@ -39,21 +52,24 @@ def decode_token(token: str):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+
+# --- Auth endpoints ---
+
 @router.post("/register", response_model=UserResponse)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    # Проверка email на @stud.nstu.ru
+    # Only @stud.nstu.ru emails are allowed
     if not user_data.email.endswith("@stud.nstu.ru"):
         raise HTTPException(
             status_code=400,
-            detail="Только почта @stud.nstu.ru разрешена для регистрации"
+            detail="Only @stud.nstu.ru email addresses are allowed"
         )
-    
-    # Проверка существующего пользователя
+
+    # Check if user already exists
     existing = db.query(User).filter(User.email == user_data.email).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Пользователь уже существует")
-    
-    # Создание пользователя
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    # Create new user with hashed password
     hashed = get_password_hash(user_data.password)
     db_user = User(
         email=user_data.email,
@@ -63,7 +79,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    
+
     return UserResponse(
         id=db_user.id,
         email=db_user.email,
@@ -75,11 +91,12 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_data.email).first()
     if not user or not verify_password(user_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Неверный email или пароль")
-    
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
     token = create_access_token({"sub": user.email, "id": user.id})
     return {
-        "token": token,
+        "access_token": token,
+        "token_type": "bearer",
         "user": {
             "id": user.id,
             "email": user.email,
@@ -88,7 +105,11 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
     }
 
 @router.get("/me")
-def get_me(token: str, db: Session = Depends(get_db)):
+def get_me(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Returns the current authenticated user. Requires Bearer token in Authorization header."""
     payload = decode_token(token)
     user = db.query(User).filter(User.id == payload["id"]).first()
     if not user:
@@ -101,13 +122,18 @@ def get_me(token: str, db: Session = Depends(get_db)):
     }
 
 @router.post("/chats/save")
-def save_chats(token: str, data: ChatSave, db: Session = Depends(get_db)):
+def save_chat(
+    data: ChatSave,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Save or update a chat for the authenticated user. Requires Bearer token."""
     payload = decode_token(token)
     user = db.query(User).filter(User.id == payload["id"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # Обновляем или создаём чат
+
+    # Update existing chat or create a new one
     chat = db.query(Chat).filter(Chat.id == data.id, Chat.user_id == user.id).first()
     if chat:
         chat.title = data.title
@@ -121,17 +147,21 @@ def save_chats(token: str, data: ChatSave, db: Session = Depends(get_db)):
             messages=data.messages
         )
         db.add(chat)
-    
+
     db.commit()
     return {"success": True}
 
 @router.get("/chats")
-def get_chats(token: str, db: Session = Depends(get_db)):
+def get_chats(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Returns all chats for the authenticated user. Requires Bearer token."""
     payload = decode_token(token)
     user = db.query(User).filter(User.id == payload["id"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     chats = db.query(Chat).filter(Chat.user_id == user.id).all()
     return [
         {
