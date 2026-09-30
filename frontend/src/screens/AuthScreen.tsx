@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 
@@ -18,13 +19,27 @@ const AuthScreen = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Password visibility toggles (separate for each field)
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
+
   const { login, register } = useAuth();
 
+  // Reset form state when switching between login and register
+  const handleSwitchMode = () => {
+    setIsLogin(!isLogin);
+    setPassword('');
+    setConfirmPassword('');
+    setIsPasswordVisible(false);
+    setIsConfirmPasswordVisible(false);
+  };
+
   const handleSubmit = async () => {
-    // Валидация
+    // Basic field validation
     if (!email.trim() || !password.trim()) {
       Alert.alert('Ошибка', 'Заполните все поля');
       return;
@@ -37,6 +52,12 @@ const AuthScreen = () => {
 
     if (!isLogin && !email.endsWith('@stud.nstu.ru')) {
       Alert.alert('Ошибка', 'Только почта @stud.nstu.ru разрешена для регистрации');
+      return;
+    }
+
+    // Password confirmation check (registration only)
+    if (!isLogin && password !== confirmPassword) {
+      Alert.alert('Ошибка', 'Пароли не совпадают');
       return;
     }
 
@@ -60,7 +81,7 @@ const AuthScreen = () => {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
             <Text style={styles.title}>🤖 Байт</Text>
             <Text style={styles.subtitle}>
@@ -69,6 +90,7 @@ const AuthScreen = () => {
           </View>
 
           <View style={styles.form}>
+            {/* Name field — register only */}
             {!isLogin && (
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Имя</Text>
@@ -82,11 +104,12 @@ const AuthScreen = () => {
               </View>
             )}
 
+            {/* Email field */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email</Text>
               <TextInput
                 style={styles.input}
-                placeholder={isLogin ? "email@stud.nstu.ru" : "email@stud.nstu.ru"}
+                placeholder="email@stud.nstu.ru"
                 placeholderTextColor="#8e8e93"
                 value={email}
                 onChangeText={setEmail}
@@ -99,17 +122,65 @@ const AuthScreen = () => {
               )}
             </View>
 
+            {/* Password field with eye toggle */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Пароль</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Минимум 6 символов"
-                placeholderTextColor="#8e8e93"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
+              <View style={styles.passwordWrapper}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Минимум 6 символов"
+                  placeholderTextColor="#8e8e93"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!isPasswordVisible}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setIsPasswordVisible(prev => !prev)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {isPasswordVisible
+                    ? <EyeOff size={20} color="#8e8e93" />
+                    : <Eye size={20} color="#8e8e93" />
+                  }
+                </TouchableOpacity>
+              </View>
             </View>
+
+            {/* Confirm password — register only */}
+            {!isLogin && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Повторите пароль</Text>
+                <View style={styles.passwordWrapper}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder="Повторите пароль"
+                    placeholderTextColor="#8e8e93"
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    secureTextEntry={!isConfirmPasswordVisible}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={styles.eyeButton}
+                    onPress={() => setIsConfirmPasswordVisible(prev => !prev)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    {isConfirmPasswordVisible
+                      ? <EyeOff size={20} color="#8e8e93" />
+                      : <Eye size={20} color="#8e8e93" />
+                    }
+                  </TouchableOpacity>
+                </View>
+                {/* Inline mismatch hint */}
+                {confirmPassword.length > 0 && password !== confirmPassword && (
+                  <Text style={styles.errorHint}>Пароли не совпадают</Text>
+                )}
+              </View>
+            )}
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
@@ -127,7 +198,7 @@ const AuthScreen = () => {
 
             <TouchableOpacity
               style={styles.switchButton}
-              onPress={() => setIsLogin(!isLogin)}
+              onPress={handleSwitchMode}
             >
               <Text style={styles.switchText}>
                 {isLogin
@@ -188,8 +259,34 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2C2D2E',
   },
+  // Password field: row with input + eye icon
+  passwordWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E1F20',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2C2D2E',
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#fff',
+    fontSize: 16,
+  },
+  eyeButton: {
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   hint: {
     color: '#8e8e93',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  errorHint: {
+    color: '#FF453A',
     fontSize: 12,
     marginTop: 4,
   },

@@ -21,7 +21,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const API_URL = Platform.OS === 'android' 
-  ? 'http://192.168.0.179:8000' 
+  ? 'http://192.168.50.100:8000' 
   : 'http://localhost:8000';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -62,10 +62,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const data = await response.json();
+    // Backend returns OAuth2-standard shape: { access_token, token_type, user }
     setUser(data.user);
-    setToken(data.token);
-    
-    await AsyncStorage.setItem('@auth_token', data.token);
+    setToken(data.access_token);
+
+    await AsyncStorage.setItem('@auth_token', data.access_token);
     await AsyncStorage.setItem('@auth_user', JSON.stringify(data.user));
   };
 
