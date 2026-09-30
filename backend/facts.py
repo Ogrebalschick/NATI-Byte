@@ -1,18 +1,86 @@
 """AI memory about a student. The owner can inspect and delete every fact."""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from auth import decode_token, oauth2_scheme
 from database import User, UserFact, get_db
-from models import UserFactsGroupedResponse
+from models import UserFactsCreate, UserFactsGroupedResponse
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
 # Stable order for the sources the app writes. Unknown sources are still returned.
 FACT_SOURCES = ("cabinet", "chat", "notes", "grades")
+MAX_FACT_LENGTH = 400
+MAX_FACTS_PER_REQUEST = 12
+
+_WORD = re.compile(r"[a-zа-я0-9]+(?:-[a-zа-я0-9]+)*", re.IGNORECASE)
+# Words that don't distinguish one memory from another.
+_STOP = frozenset({
+    "я", "мы", "ты", "он", "она", "они", "мне", "меня", "мой", "моя", "мои", "мое",
+    "это", "этот", "эта", "эти", "есть", "быть", "является", "являюсь",
+    "и", "а", "но", "или", "что", "как", "не", "да", "уже", "еще", "тоже", "также",
+    "в", "на", "по", "с", "со", "к", "ко", "из", "от", "для", "о", "об", "у", "за",
+    "очень", "просто", "вообще", "тоже",
+    "люблю", "любит", "любишь", "любят", "нравится", "нравятся", "обожаю", "обожает",
+    "увлекаюсь", "увлекается", "занимаюсь", "занимается", "предпочитаю", "предпочитает",
+    "студент", "студентка", "пользователь",
+})
+_ENDINGS = (
+    "ироваться", "ирование", "ировать", "ование", "овать", "евать", "ивать",
+    "ениями", "остями", "ами", "ями", "ого", "ему", "ыми", "ими",
+    "ение", "ание", "ость", "ах", "ях", "ов", "ев", "ей",
+    "ий", "ый", "ой", "ая", "яя", "ое", "ее", "ые", "ие",
+    "ать", "ять", "ить", "еть", "ться", "ть", "ся",
+)
+
+
+def _normalize(text: str) -> str:
+    cleaned = (text or "").lower().replace("ё", "е")
+    cleaned = re.sub(r"[^a-zа-я0-9\s-]", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _stem(word: str) -> str:
+    for ending in _ENDINGS:
+        if word.endswith(ending) and len(word) - len(ending) >= 4:
+            return word[: -len(ending)]
+    if len(word) > 4 and word[-1] in "аеиоуыэюяьй":
+        return word[:-1]
+    return word
+
+
+def _tokens(text: str) -> frozenset[str]:
+    found: list[str] = []
+    for word in _WORD.findall(_normalize(text)):
+        if word in _STOP:
+            continue
+        if len(word) < 3 and not any(char.isdigit() for char in word):
+            continue
+        if any(char.isdigit() for char in word):
+            found.append(word)
+        else:
+            found.append(_stem(word))
+    return frozenset(found)
+
+
+def _same_fact(candidate: str, stored: str) -> bool:
+    """True when the candidate adds nothing beyond a fact already stored."""
+    left = _normalize(candidate)
+    right = _normalize(stored)
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    candidate_tokens = _tokens(candidate)
+    stored_tokens = _tokens(stored)
+    if not candidate_tokens or not stored_tokens:
+        return False
+    return candidate_tokens <= stored_tokens
 
 
 def _current_user(token: str, db: Session) -> User:
@@ -72,6 +140,50 @@ def list_facts(
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=500, detail="Не удалось загрузить память ИИ") from exc
     return {"groups": _group_facts(rows)}
+
+
+@router.post("/facts")
+def create_facts(
+    data: UserFactsCreate,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Store new facts. Exact copies and paraphrases of stored facts are skipped."""
+    user = _current_user(token, db)
+    source = data.source if data.source in FACT_SOURCES else "chat"
+    cleaned: list[str] = []
+    for raw in data.facts[:MAX_FACTS_PER_REQUEST]:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        if len(text) > MAX_FACT_LENGTH:
+            text = text[:MAX_FACT_LENGTH].rstrip()
+        if any(_same_fact(text, kept) for kept in cleaned):
+            continue
+        cleaned.append(text)
+    if not cleaned:
+        return {"created": []}
+    try:
+        existing = [
+            (row.fact_text or "").strip()
+            for row in db.query(UserFact).filter(UserFact.user_id == user.id).all()
+            if (row.fact_text or "").strip()
+        ]
+        created: list[UserFact] = []
+        for text in cleaned:
+            if any(_same_fact(text, stored) for stored in existing):
+                continue
+            row = UserFact(user_id=user.id, fact_text=text, source=source)
+            db.add(row)
+            created.append(row)
+            existing.append(text)
+        db.commit()
+        for row in created:
+            db.refresh(row)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Не удалось сохранить факты") from exc
+    return {"created": [_fact_to_dict(row) for row in created]}
 
 
 @router.delete("/facts/all")

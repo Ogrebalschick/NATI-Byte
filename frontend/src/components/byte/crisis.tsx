@@ -41,21 +41,58 @@ export const createCrisisMessage = (id: number): Message => {
   };
 };
 
-/**
- * Пытается извлечь из текста ответа JSON-объект с полями answer и risk_score.
- * Возвращает { answer, riskScore } или null, если не удалось.
- */
-export const extractRiskFromResponse = (response: string): { answer: string; riskScore: number } | null => {
+export type ParsedAgentReply = {
+  answer: string;
+  riskScore: number;
+  newFacts: string[];
+};
+
+function readFactList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const facts: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const text = item.trim();
+    const key = text.toLowerCase();
+    if (!text || text.length > 400 || seen.has(key)) continue;
+    seen.add(key);
+    facts.push(text);
+    if (facts.length >= 8) break;
+  }
+  return facts;
+}
+
+function readReplyJson(response: string): Record<string, unknown> | null {
   try {
-    // Ищем JSON-блок в фигурных скобках (может быть с пробелами и переносами)
     const match = response.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const json = JSON.parse(match[0]);
-    if (typeof json.answer === 'string' && typeof json.risk_score === 'number') {
-      return { answer: json.answer, riskScore: json.risk_score };
-    }
-    return null;
-  } catch (e) {
+    if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
+    return json as Record<string, unknown>;
+  } catch {
     return null;
   }
+}
+
+/**
+ * Новые факты из JSON ответа. Пустой массив, если поля нет или JSON не разобрался.
+ */
+export const extractNewFactsFromResponse = (response: string): string[] => {
+  const json = readReplyJson(response);
+  return json ? readFactList(json.new_facts) : [];
+};
+
+/**
+ * Пытается извлечь из текста ответа JSON-объект с полями answer и risk_score.
+ * Возвращает { answer, riskScore, newFacts } или null, если не удалось.
+ */
+export const extractRiskFromResponse = (response: string): ParsedAgentReply | null => {
+  const json = readReplyJson(response);
+  if (!json) return null;
+  const newFacts = readFactList(json.new_facts);
+  if (typeof json.answer === 'string' && typeof json.risk_score === 'number') {
+    return { answer: json.answer, riskScore: json.risk_score, newFacts };
+  }
+  return null;
 };

@@ -23,8 +23,10 @@ import { handleApiError, createErrorMessage } from '@/components/byte/error';
 import {
   isCrisisMessage,
   createCrisisMessage,
+  extractNewFactsFromResponse,
   extractRiskFromResponse,
 } from '@/components/byte/crisis';
+import { createChatFacts, factTexts, fetchFactGroups, mergeFactTexts } from '../api/factsApi';
 import { useChatSync } from '../hooks/useChatSync';
 import {
   GUEST_CHATS_KEY,
@@ -85,7 +87,7 @@ const Byte = () => {
   const tabBarHeight = useBottomTabBarHeight();
 
   // Auth state drives which AsyncStorage keys we read/write.
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, token } = useAuth();
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -161,7 +163,21 @@ const Byte = () => {
         applyChats(mergeChatLists(guestChats, cloudChats.length > 0 ? cloudChats : localUserChats));
 
         const factsRaw = userFactsRaw || guestFactsRaw;
-        setFacts(factsRaw ? JSON.parse(factsRaw) : []);
+        let knownFacts: string[] = [];
+        try {
+          knownFacts = factsRaw ? JSON.parse(factsRaw) : [];
+          if (!Array.isArray(knownFacts)) knownFacts = [];
+        } catch {
+          knownFacts = [];
+        }
+        if (token) {
+          try {
+            knownFacts = mergeFactTexts(knownFacts, factTexts(await fetchFactGroups(token)));
+          } catch (err) {
+            console.warn('Failed to load AI memory', err);
+          }
+        }
+        setFacts(knownFacts.filter(item => typeof item === 'string'));
 
         if (guestChats.length > 0) {
           await AsyncStorage.multiRemove([GUEST_CHATS_KEY, GUEST_FACTS_KEY]);
@@ -333,14 +349,17 @@ const Byte = () => {
 Верни ответ в формате JSON:
 {
   "answer": "твой развёрнутый ответ пользователю",
-  "risk_score": число от 1 до 10
+  "risk_score": число от 1 до 10,
+  "new_facts": ["короткий новый факт о пользователе"]
 }
 
 Никакого другого текста, только JSON.
 
 Если пользователь выражает суицидальные мысли, намерения или сильное желание причинить себе вред, поставь risk_score не ниже 8.
 
-Факты о пользователе (если есть) используй для персонализации, но не повторяй их в ответе, если они уже переданы.`;
+В new_facts клади только устойчивые факты, которые пользователь сам сообщил в этом сообщении: имя, группа, факультет, курс, предпочтения в учёбе. Одна короткая фраза на факт. Не выдумывай. Если такой факт уже есть в известных, даже другими словами, не добавляй его. Если новых фактов нет, верни пустой массив.
+
+Известные факты используй для персонализации, но не повторяй их в ответе без нужды.`;
 
     if (facts.length > 0) {
       systemPrompt += `\n\nПользователь уже сообщил о себе:\n${facts.map(f => `- ${f}`).join('\n')}`;
@@ -375,6 +394,20 @@ const Byte = () => {
       if (response.ok) {
         const rawAnswer = data.answer || '';
         const parsed = extractRiskFromResponse(rawAnswer);
+        const incomingFacts = parsed?.newFacts ?? extractNewFactsFromResponse(rawAnswer);
+        if (incomingFacts.length > 0) {
+          if (token) {
+            createChatFacts(token, incomingFacts)
+              .then(created => {
+                if (created.length > 0) setFacts(prev => mergeFactTexts(prev, created));
+              })
+              .catch(err => {
+                console.warn('Failed to save AI memory', err);
+              });
+          } else {
+            setFacts(prev => mergeFactTexts(prev, incomingFacts));
+          }
+        }
         if (parsed) {
           const { answer, riskScore } = parsed;
           if (riskScore >= 7) {

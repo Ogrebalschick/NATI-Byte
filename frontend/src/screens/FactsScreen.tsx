@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -117,9 +117,11 @@ const FactsList = ({ token }: { token: string }) => {
     }
   }, [token]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
 
   const liveSources = useMemo(() => orderedSources(groups), [groups]);
   const [heldSources, setHeldSources] = useState<string[]>([]);
