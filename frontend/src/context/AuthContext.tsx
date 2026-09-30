@@ -9,6 +9,9 @@ interface User {
   email: string;
   name: string;
   is_2fa_enabled?: boolean;
+  full_name?: string | null;
+  student_group?: string | null;
+  is_synced_with_nstu?: boolean;
 }
 
 interface AuthContextType {
@@ -32,6 +35,7 @@ interface AuthContextType {
   toggle2FA: (enabled: boolean) => Promise<void>;
   requestPasswordReset: () => Promise<void>;
   confirmPasswordReset: (code: string, newPassword: string) => Promise<void>;
+  parseCabinet: (pageType: 'profile' | 'timetable', rawText: string) => Promise<any>;
 }
 
 // ── Context setup ──────────────────────────────────────────────────────────────
@@ -223,6 +227,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const parseCabinet = async (pageType: 'profile' | 'timetable', rawText: string) => {
+    if (!token) throw new Error('Вы не авторизованы');
+    const response = await fetch(`${API_URL}/sync/parse-cabinet`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ page_type: pageType, raw_text: rawText }),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Не удалось разобрать страницу личного кабинета');
+    }
+    const data = await response.json();
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = {
+        ...prev,
+        full_name: data.full_name ?? prev.full_name,
+        student_group: data.student_group ?? prev.student_group,
+        is_synced_with_nstu: data.is_synced_with_nstu ?? true,
+      };
+      AsyncStorage.setItem('@auth_user', JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
+    return data;
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -239,6 +272,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         toggle2FA,
         requestPasswordReset,
         confirmPasswordReset,
+        parseCabinet,
       }}
     >
       {children}

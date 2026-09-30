@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { useAuth } from '../context/AuthContext';
+import { NstuImportModal } from '../components/NstuImportModal';
 
 // ─── Guest wall ────────────────────────────────────────────────────────────────
 
@@ -364,14 +365,24 @@ const ChangePasswordModal = ({
 };
 
 const AuthenticatedProfile = () => {
-  const { user, logout, deleteAccount, toggle2FA, requestPasswordReset, confirmPasswordReset } = useAuth();
+  const {
+    user,
+    logout,
+    deleteAccount,
+    toggle2FA,
+    requestPasswordReset,
+    confirmPasswordReset,
+    parseCabinet,
+  } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordRequestLoading, setPasswordRequestLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isWebViewVisible, setIsWebViewVisible] = useState(false);
   const [is2FAEnabled, setIs2FAEnabled] = useState(user?.is_2fa_enabled ?? false);
   const [togglingFA, setTogglingFA] = useState(false);
+  const nstuSuccessTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!successMessage) return;
@@ -426,6 +437,13 @@ const AuthenticatedProfile = () => {
     setSuccessMessage('Пароль успешно изменён');
   };
 
+  const handleNstuFinished = () => {
+    setIsWebViewVisible(false);
+    setSuccessMessage('Профиль и расписание НГТУ успешно импортированы!');
+    if (nstuSuccessTimer.current) clearTimeout(nstuSuccessTimer.current);
+    nstuSuccessTimer.current = setTimeout(() => setSuccessMessage(null), 6000);
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.containerContent}>
       {successMessage && (
@@ -439,10 +457,15 @@ const AuthenticatedProfile = () => {
       <View style={styles.header}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>
-            {user?.name?.charAt(0)?.toUpperCase() ?? '?'}
+            {user?.full_name?.charAt(0)?.toUpperCase()
+              || user?.name?.charAt(0)?.toUpperCase()
+              || '?'}
           </Text>
         </View>
-        <Text style={styles.name}>{user?.name ?? 'Пользователь'}</Text>
+        <Text style={styles.name}>{user?.full_name || user?.name || 'Пользователь'}</Text>
+        {!!user?.student_group && (
+          <Text style={styles.groupBadge}>Группа {user.student_group}</Text>
+        )}
         <Text style={styles.email}>{user?.email ?? ''}</Text>
       </View>
 
@@ -463,6 +486,17 @@ const AuthenticatedProfile = () => {
         <TouchableOpacity style={styles.menuItem}>
           <Ionicons name="stats-chart-outline" size={24} color="#fff" />
           <Text style={styles.menuText}>Статистика</Text>
+          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.menuItem} onPress={() => setIsWebViewVisible(true)}>
+          <Ionicons name="school-outline" size={24} color="#fff" />
+          <View style={styles.menuTextCol}>
+            <Text style={styles.menuText}>Импортировать данные из Личного кабинета НГТУ</Text>
+            <Text style={styles.menuSubtext}>
+              {user?.is_synced_with_nstu ? 'Данные уже синхронизированы' : 'Профиль и расписание YourNeti'}
+            </Text>
+          </View>
           <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
         </TouchableOpacity>
       </View>
@@ -517,6 +551,13 @@ const AuthenticatedProfile = () => {
       <View style={styles.footer}>
         <Text style={styles.footerText}>Версия 1.0.0</Text>
       </View>
+
+      <NstuImportModal
+        visible={isWebViewVisible}
+        onClose={() => setIsWebViewVisible(false)}
+        onScraped={parseCabinet}
+        onFinished={handleNstuFinished}
+      />
 
       <ChangePasswordModal
         visible={showPasswordModal}
@@ -618,6 +659,12 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 32, fontWeight: 'bold', color: '#fff' },
   name: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
   email: { fontSize: 14, color: '#8e8e93' },
+  groupBadge: {
+    fontSize: 13,
+    color: '#007AFF',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
 
   sectionLabel: {
     fontSize: 12,
