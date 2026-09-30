@@ -30,6 +30,8 @@ interface AuthContextType {
   logout: () => Promise<void>;
   deleteAccount: () => Promise<void>;
   toggle2FA: (enabled: boolean) => Promise<void>;
+  requestPasswordReset: () => Promise<void>;
+  confirmPasswordReset: (code: string, newPassword: string) => Promise<void>;
 }
 
 // ── Context setup ──────────────────────────────────────────────────────────────
@@ -193,6 +195,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const requestPasswordReset = async () => {
+    if (!token) throw new Error('Вы не авторизованы');
+    const response = await fetch(`${API_URL}/auth/password-reset/request`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Не удалось отправить код');
+    }
+  };
+
+  const confirmPasswordReset = async (code: string, newPassword: string) => {
+    if (!token) throw new Error('Вы не авторизованы');
+    const response = await fetch(`${API_URL}/auth/password-reset/confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ code, new_password: newPassword }),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Не удалось изменить пароль');
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -207,6 +237,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         logout,
         deleteAccount,
         toggle2FA,
+        requestPasswordReset,
+        confirmPasswordReset,
       }}
     >
       {children}

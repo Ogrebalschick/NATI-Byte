@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,12 @@ import {
   Switch,
   ActivityIndicator,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { useAuth } from '../context/AuthContext';
 
@@ -165,14 +168,216 @@ const DeleteAccountModal = ({ visible, onClose, onConfirm }: DeleteModalProps) =
   );
 };
 
-// ─── Authenticated profile ─────────────────────────────────────────────────────
+// ─── Change-password modal ─────────────────────────────────────────────────────
+
+interface ChangePasswordModalProps {
+  visible: boolean;
+  loadingRequest: boolean;
+  onClose: () => void;
+  onConfirm: (code: string, newPassword: string) => Promise<void>;
+  onResend: () => Promise<void>;
+}
+
+const ChangePasswordModal = ({
+  visible,
+  loadingRequest,
+  onClose,
+  onConfirm,
+  onResend,
+}: ChangePasswordModalProps) => {
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword;
+  const mismatchHint = confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const canSubmit =
+    passwordsMatch &&
+    newPassword.length >= 6 &&
+    code.trim().length === 6 &&
+    !loading &&
+    !loadingRequest;
+
+  const resetFields = () => {
+    setNewPassword('');
+    setConfirmPassword('');
+    setCode('');
+    setShowNew(false);
+    setShowConfirm(false);
+    setError(null);
+  };
+
+  const handleClose = () => {
+    resetFields();
+    onClose();
+  };
+
+  const handleResend = async () => {
+    setError(null);
+    try {
+      await onResend();
+    } catch (err: any) {
+      setError(err.message || 'Не удалось отправить код повторно');
+    }
+  };
+    if (!passwordsMatch) {
+      setError('Пароли не совпадают');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError('Пароль должен содержать минимум 6 символов');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await onConfirm(code.trim(), newPassword);
+      resetFields();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Не удалось изменить пароль');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+      <KeyboardAvoidingView
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.modalBox}>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalLockIcon}>
+                <Ionicons name="lock-closed-outline" size={28} color="#007AFF" />
+              </View>
+              <Text style={styles.modalTitle}>Изменить пароль</Text>
+            </View>
+
+            <Text style={styles.modalBody}>
+              Код подтверждения отправлен на вашу почту. Введите новый пароль и 6-значный код из письма.
+            </Text>
+
+            {loadingRequest && (
+              <Text style={styles.modalHint}>Отправляем код на почту…</Text>
+            )}
+
+            {/* New password */}
+            <Text style={styles.modalFieldLabel}>Новый пароль</Text>
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Минимум 6 символов"
+                placeholderTextColor="#636366"
+                value={newPassword}
+                onChangeText={text => { setNewPassword(text); setError(null); }}
+                secureTextEntry={!showNew}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowNew(prev => !prev)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                {showNew ? <EyeOff size={20} color="#8e8e93" /> : <Eye size={20} color="#8e8e93" />}
+              </TouchableOpacity>
+            </View>
+
+            {/* Confirm password */}
+            <Text style={styles.modalFieldLabel}>Повторите новый пароль</Text>
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Повторите пароль"
+                placeholderTextColor="#636366"
+                value={confirmPassword}
+                onChangeText={text => { setConfirmPassword(text); setError(null); }}
+                secureTextEntry={!showConfirm}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowConfirm(prev => !prev)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                {showConfirm ? <EyeOff size={20} color="#8e8e93" /> : <Eye size={20} color="#8e8e93" />}
+              </TouchableOpacity>
+            </View>
+            {mismatchHint && (
+              <Text style={styles.fieldError}>Пароли не совпадают</Text>
+            )}
+
+            {/* Email code */}
+            <Text style={styles.modalFieldLabel}>Код из письма</Text>
+            <TextInput
+              style={[styles.modalInput, styles.codeInput]}
+              placeholder="000000"
+              placeholderTextColor="#636366"
+              value={code}
+              onChangeText={text => { setCode(text.replace(/\D/g, '').slice(0, 6)); setError(null); }}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+            <Text style={styles.modalHint}>Код действителен 10 минут</Text>
+
+            {error && (
+              <View style={styles.modalError}>
+                <Text style={styles.modalErrorText}>{error}</Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[styles.modalSaveButton, !canSubmit && styles.modalDeleteButtonDisabled]}
+              onPress={handleSubmit}
+              disabled={!canSubmit}
+            >
+              {loading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.modalDeleteButtonText}>Сохранить новый пароль</Text>
+              }
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={handleResend}
+              disabled={loadingRequest}
+            >
+              <Text style={styles.resendText}>Отправить код повторно</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.modalCancelButton} onPress={handleClose}>
+              <Text style={styles.modalCancelText}>Отмена</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+};
 
 const AuthenticatedProfile = () => {
-  const { user, logout, deleteAccount, toggle2FA } = useAuth();
+  const { user, logout, deleteAccount, toggle2FA, requestPasswordReset, confirmPasswordReset } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordRequestLoading, setPasswordRequestLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [is2FAEnabled, setIs2FAEnabled] = useState(user?.is_2fa_enabled ?? false);
   const [togglingFA, setTogglingFA] = useState(false);
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(null), 3500);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   const handleLogout = () => {
     Alert.alert('Выход', 'Вы уверены, что хотите выйти?', [
@@ -194,8 +399,42 @@ const AuthenticatedProfile = () => {
     }
   };
 
+  const openPasswordModal = async () => {
+    setShowPasswordModal(true);
+    setPasswordRequestLoading(true);
+    try {
+      await requestPasswordReset();
+    } catch (err: any) {
+      setShowPasswordModal(false);
+      Alert.alert('Ошибка', err.message || 'Не удалось отправить код на почту');
+    } finally {
+      setPasswordRequestLoading(false);
+    }
+  };
+
+  const resendPasswordCode = async () => {
+    setPasswordRequestLoading(true);
+    try {
+      await requestPasswordReset();
+    } finally {
+      setPasswordRequestLoading(false);
+    }
+  };
+
+  const handlePasswordConfirm = async (code: string, newPassword: string) => {
+    await confirmPasswordReset(code, newPassword);
+    setSuccessMessage('Пароль успешно изменён');
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.containerContent}>
+      {successMessage && (
+        <View style={styles.successBanner}>
+          <Ionicons name="checkmark-circle" size={18} color="#30D158" />
+          <Text style={styles.successBannerText}>{successMessage}</Text>
+        </View>
+      )}
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.avatar}>
@@ -231,6 +470,12 @@ const AuthenticatedProfile = () => {
       {/* Security section */}
       <Text style={styles.sectionLabel}>БЕЗОПАСНОСТЬ</Text>
       <View style={styles.menu}>
+        <TouchableOpacity style={styles.menuItem} onPress={openPasswordModal}>
+          <Ionicons name="key-outline" size={24} color="#fff" />
+          <Text style={styles.menuText}>Изменить пароль</Text>
+          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
+        </TouchableOpacity>
+
         {/* 2FA toggle */}
         <View style={styles.menuItemSwitch}>
           <Ionicons name="shield-checkmark-outline" size={24} color="#fff" />
@@ -273,7 +518,14 @@ const AuthenticatedProfile = () => {
         <Text style={styles.footerText}>Версия 1.0.0</Text>
       </View>
 
-      {/* Delete modal */}
+      <ChangePasswordModal
+        visible={showPasswordModal}
+        loadingRequest={passwordRequestLoading}
+        onClose={() => setShowPasswordModal(false)}
+        onConfirm={handlePasswordConfirm}
+        onResend={resendPasswordCode}
+      />
+
       <DeleteAccountModal
         visible={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
@@ -409,6 +661,20 @@ const styles = StyleSheet.create({
   footer: { alignItems: 'center', paddingTop: 32 },
   footerText: { color: '#8e8e93', fontSize: 12 },
 
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(48, 209, 88, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(48, 209, 88, 0.4)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginTop: 16,
+  },
+  successBannerText: { color: '#30D158', fontSize: 15, fontWeight: '600', flex: 1 },
+
   // ── Delete modal ──
   modalOverlay: {
     flex: 1,
@@ -472,4 +738,55 @@ const styles = StyleSheet.create({
   modalDeleteButtonText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   modalCancelButton: { alignItems: 'center', paddingVertical: 10 },
   modalCancelText: { color: '#8e8e93', fontSize: 15 },
+  modalLockIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(0,122,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  modalFieldLabel: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  modalHint: { color: '#8e8e93', fontSize: 12, marginBottom: 12 },
+  passwordWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2C2D2E',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3a3a3c',
+    marginBottom: 12,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 16,
+  },
+  eyeButton: { paddingHorizontal: 12, justifyContent: 'center', alignItems: 'center' },
+  fieldError: { color: '#FF453A', fontSize: 12, marginTop: -6, marginBottom: 10 },
+  codeInput: {
+    textAlign: 'center',
+    letterSpacing: 8,
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  modalSaveButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  resendText: { color: '#007AFF', fontSize: 14 },
 });

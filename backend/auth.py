@@ -16,6 +16,7 @@ from models import (
     RegisterInit, VerifyRegister,
     UserLogin, VerifyLogin,
     UserResponse, ChatSave, Set2FARequest,
+    PasswordResetConfirm,
 )
 from database import get_db, User, Chat
 
@@ -53,6 +54,8 @@ SMTP_FROM    = os.getenv("SMTP_FROM", "") or SMTP_USER
 _pending_reg: dict = {}
 # email → {"code": str, "expires_at": datetime, "user_id": int}
 _pending_login: dict = {}
+# user_id → {"code": str, "expires_at": datetime, "email": str}
+_pending_password: dict = {}
 _store_lock = threading.Lock()
 
 CODE_TTL_MINUTES = 10
@@ -94,11 +97,15 @@ def _user_to_dict(user: User) -> dict:
 def _build_email_body(code: str, purpose: str) -> str:
     """Return a Russian-language plain-text email body."""
     separator = "─" * 40
+    if purpose == "смены пароля":
+        headline = f"Ваш код для смены пароля в BYTE: {code}."
+    else:
+        headline = f"Ваш одноразовый код подтверждения для BYTE: {code}."
     return (
         f"Привет!\n\n"
         f"Вы запросили код подтверждения для {purpose} в приложении BYTE.\n\n"
         f"{separator}\n"
-        f"Ваш одноразовый код подтверждения для BYTE: {code}.\n"
+        f"{headline}\n"
         f"Никому не сообщайте этот код.\n"
         f"{separator}\n\n"
         f"Код действителен {CODE_TTL_MINUTES} минут.\n"
@@ -116,7 +123,7 @@ def _log_code_to_console(to_email: str, code: str, purpose: str = "") -> None:
     print(f"{'=' * 52}\n")
 
 
-def send_smtp_email(to_email: str, code: str) -> None:
+def send_smtp_email(to_email: str, code: str, purpose: str = "подтверждения") -> None:
     """
     Send a one-time verification code through Mail.ru SMTP.
 
@@ -124,13 +131,13 @@ def send_smtp_email(to_email: str, code: str) -> None:
     Any SMTP/network failure is logged and the code is duplicated to the
     backend console so the registration flow is not blocked.
     """
-    _log_code_to_console(to_email, code)
+    _log_code_to_console(to_email, code, purpose)
 
     if not SMTP_USER or not SMTP_PASS:
         print("[EMAIL] SMTP is not configured — code printed to console only.")
         return
 
-    body = _build_email_body(code, purpose="подтверждения")
+    body = _build_email_body(code, purpose)
 
     msg = MIMEMultipart("alternative")
     msg["From"] = SMTP_FROM
@@ -171,9 +178,9 @@ def send_smtp_email(to_email: str, code: str) -> None:
 
 
 def send_verification_email(to_email: str, code: str, purpose: str = "регистрации") -> None:
-    """Register/2FA wrapper: log purpose, then send via Mail.ru SMTP."""
+    """Register/2FA/password-reset wrapper: log purpose, then send via Mail.ru SMTP."""
     print(f"[EMAIL] Sending verification code for {purpose}")
-    send_smtp_email(to_email, code)
+    send_smtp_email(to_email, code, purpose=purpose)
 
 
 # ── Registration (two-step: init → verify) ────────────────────────────────────
@@ -371,6 +378,66 @@ def set_2fa(
         "is_2fa_enabled": data.enabled,
         "message": f"Двухфакторная аутентификация {'включена' if data.enabled else 'отключена'}",
     }
+
+
+@router.post("/password-reset/request")
+def password_reset_request(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Send a 6-digit code to the authenticated user's email for a password change."""
+    payload = decode_token(token)
+    user = db.query(User).filter(User.id == payload["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    code = generate_code()
+    expires = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
+    with _store_lock:
+        _pending_password[user.id] = {
+            "code": code,
+            "expires_at": expires,
+            "email": user.email,
+        }
+
+    send_verification_email(user.email, code, purpose="смены пароля")
+    return {"status": "code_sent", "message": "Код для смены пароля отправлен на вашу почту"}
+
+
+@router.post("/password-reset/confirm")
+def password_reset_confirm(
+    data: PasswordResetConfirm,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Verify the email code and persist the new bcrypt-hashed password."""
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 6 символов")
+
+    payload = decode_token(token)
+    user = db.query(User).filter(User.id == payload["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    with _store_lock:
+        pending = _pending_password.get(user.id)
+
+    if not pending:
+        raise HTTPException(status_code=400, detail="Сначала запросите код для смены пароля")
+    if datetime.utcnow() > pending["expires_at"]:
+        with _store_lock:
+            _pending_password.pop(user.id, None)
+        raise HTTPException(status_code=400, detail="Код истёк. Запросите новый.")
+    if pending["code"] != data.code.strip():
+        raise HTTPException(status_code=400, detail="Неверный код подтверждения")
+
+    user.password_hash = get_password_hash(data.new_password)
+    db.commit()
+
+    with _store_lock:
+        _pending_password.pop(user.id, None)
+
+    return {"status": "updated", "message": "Пароль успешно изменён"}
 
 
 @router.post("/chats/save")

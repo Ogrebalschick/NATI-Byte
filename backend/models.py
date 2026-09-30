@@ -59,6 +59,11 @@ class ChatSave(BaseModel):
 class Set2FARequest(BaseModel):
     enabled: bool
 
+class PasswordResetConfirm(BaseModel):
+    """Step 2 of password change: email code + the new password."""
+    code: str
+    new_password: str
+
 
 # Kept for backward-compat (internal use)
 class UserCreate(BaseModel):
