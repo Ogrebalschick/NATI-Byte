@@ -441,6 +441,18 @@ const NotesScreen = () => {
       });
   };
 
+  const createCategoryFromEditor = (name: string, noteIds: string[]) => {
+    if (draft && noteIds.includes(draft.id)) {
+      setDraft(current =>
+        current && !current.categories.includes(name)
+          ? { ...current, categories: [...current.categories, name] }
+          : current,
+      );
+    }
+    const savedIds = noteIds.filter(id => notes.some(note => note.id === id));
+    createCategory(name, savedIds);
+  };
+
   const applyMarkup = (
     mutate: (value: string, current: Selection) => { value: string; selection: Selection },
   ) => {
@@ -503,6 +515,17 @@ const NotesScreen = () => {
             contentContainerStyle={styles.editChipsContent}
             keyboardShouldPersistTaps="handled"
           >
+            <TouchableOpacity
+              style={styles.addChip}
+              onPress={() => {
+                Keyboard.dismiss();
+                setSheet('create');
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Новая категория"
+            >
+              <Ionicons name="add" size={20} color="#0A84FF" />
+            </TouchableOpacity>
             {categories.map((name, index) => {
               const active = draft.categories.includes(name);
               const tone = categoryTone(name, index);
@@ -610,6 +633,20 @@ const NotesScreen = () => {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
+        <CategorySheet
+          mode={sheet}
+          notes={
+            notes.some(note => note.id === draft.id)
+              ? notes
+              : [{ ...draft, title: draft.title.trim() || 'Эта заметка' }, ...notes]
+          }
+          categories={categories}
+          presetNoteId={draft.id}
+          creatingHint="Категория сразу отметится в этой заметке. Можно добавить и другие."
+          onClose={() => setSheet(null)}
+          onCreate={createCategoryFromEditor}
+          onAssign={assignCategories}
+        />
       </ScreenWrapper>
     );
   }
@@ -862,12 +899,23 @@ type CategorySheetProps = {
   mode: SheetMode | null;
   notes: Note[];
   categories: string[];
+  presetNoteId?: string;
+  creatingHint?: string;
   onClose: () => void;
   onCreate: (name: string, noteIds: string[]) => void;
   onAssign: (names: string[]) => void;
 };
 
-function CategorySheet({ mode, notes, categories, onClose, onCreate, onAssign }: CategorySheetProps) {
+function CategorySheet({
+  mode,
+  notes,
+  categories,
+  presetNoteId,
+  creatingHint,
+  onClose,
+  onCreate,
+  onAssign,
+}: CategorySheetProps) {
   const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
   const [pickedNotes, setPickedNotes] = useState<string[]>([]);
@@ -877,10 +925,10 @@ function CategorySheet({ mode, notes, categories, onClose, onCreate, onAssign }:
   useEffect(() => {
     if (!mode) return;
     setName('');
-    setPickedNotes([]);
+    setPickedNotes(presetNoteId ? [presetNoteId] : []);
     setPickedCategories([]);
     setError(null);
-  }, [mode]);
+  }, [mode, presetNoteId]);
 
   const toggleNote = (id: string) => {
     setPickedNotes(prev => (prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]));
@@ -927,7 +975,7 @@ function CategorySheet({ mode, notes, categories, onClose, onCreate, onAssign }:
           <Text style={styles.sheetTitle}>{creating ? 'Новая категория' : 'Добавить в категорию'}</Text>
           <Text style={styles.sheetHint}>
             {creating
-              ? 'Категория появится в списке сверху. Можно сразу отметить заметки.'
+              ? creatingHint || 'Категория появится в списке сверху. Можно сразу отметить заметки.'
               : 'Категории добавятся к уже стоящим на заметках.'}
           </Text>
 
