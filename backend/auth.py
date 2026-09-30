@@ -34,13 +34,19 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
-# ── SMTP config ────────────────────────────────────────────────────────────────
+# ── SMTP config (Mail.ru: SSL on port 465) ────────────────────────────────────
+# Supports both SMTP_PASSWORD (new) and SMTP_PASS (legacy) env var names.
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "") or SMTP_USER
+def _env_flag(name: str, default: str) -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes")
+
+SMTP_HOST    = os.getenv("SMTP_HOST", "smtp.mail.ru")
+SMTP_PORT    = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USE_SSL = _env_flag("SMTP_USE_SSL", "True")
+SMTP_USE_TLS = _env_flag("SMTP_USE_TLS", "False")
+SMTP_USER    = os.getenv("SMTP_USER", "")
+SMTP_PASS    = os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS", "")
+SMTP_FROM    = os.getenv("SMTP_FROM", "") or SMTP_USER
 
 # ── In-memory pending verification stores ─────────────────────────────────────
 # email → {"code": str, "expires_at": datetime, "name": str, "password_hash": str}
@@ -85,41 +91,89 @@ def _user_to_dict(user: User) -> dict:
     }
 
 
-def send_verification_email(to_email: str, code: str, purpose: str = "регистрации") -> None:
-    """
-    Send a 6-digit code to the student's email.
-    If SMTP credentials are not configured, prints the code to the server console
-    (development fallback — useful when running locally without mail server).
-    """
-    body = (
-        f"Ваш код подтверждения для {purpose} в BYTE:\n\n"
-        f"        {code}\n\n"
+def _build_email_body(code: str, purpose: str) -> str:
+    """Return a Russian-language plain-text email body."""
+    separator = "─" * 40
+    return (
+        f"Привет!\n\n"
+        f"Вы запросили код подтверждения для {purpose} в приложении BYTE.\n\n"
+        f"{separator}\n"
+        f"Ваш одноразовый код подтверждения для BYTE: {code}.\n"
+        f"Никому не сообщайте этот код.\n"
+        f"{separator}\n\n"
         f"Код действителен {CODE_TTL_MINUTES} минут.\n"
-        f"Если вы не запрашивали этот код — проигнорируйте письмо."
+        f"Если вы не запрашивали этот код — просто проигнорируйте письмо.\n\n"
+        f"С уважением,\nКоманда BYTE"
     )
 
+
+def _log_code_to_console(to_email: str, code: str, purpose: str = "") -> None:
+    """Always print the OTP so registration/login never depend on SMTP alone."""
+    print(f"\n{'=' * 52}")
+    print(f"[EMAIL] One-time code for {to_email}: {code}")
+    if purpose:
+        print(f"[EMAIL] Purpose: {purpose}")
+    print(f"{'=' * 52}\n")
+
+
+def send_smtp_email(to_email: str, code: str) -> None:
+    """
+    Send a one-time verification code through Mail.ru SMTP.
+
+    Mail.ru requires implicit SSL on port 465 (SMTP_SSL).
+    Any SMTP/network failure is logged and the code is duplicated to the
+    backend console so the registration flow is not blocked.
+    """
+    _log_code_to_console(to_email, code)
+
     if not SMTP_USER or not SMTP_PASS:
-        # Dev mode: no SMTP configured — show code in server logs
-        print(f"\n{'='*50}")
-        print(f"[DEV] Код подтверждения для {to_email}: {code}")
-        print(f"{'='*50}\n")
+        print("[EMAIL] SMTP is not configured — code printed to console only.")
         return
 
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = SMTP_FROM
-        msg["To"] = to_email
-        msg["Subject"] = "Код подтверждения BYTE"
-        msg.attach(MIMEText(body, "plain", "utf-8"))
+    body = _build_email_body(code, purpose="подтверждения")
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_FROM, to_email, msg.as_string())
+    msg = MIMEMultipart("alternative")
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    msg["Subject"] = "Ваш код подтверждения BYTE"
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    try:
+        if SMTP_USE_SSL:
+            # Implicit SSL — Mail.ru / Yandex on port 465
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+                server.login(SMTP_USER, SMTP_PASS)
+                server.sendmail(SMTP_FROM, to_email, msg.as_string())
+        else:
+            # Optional STARTTLS — Gmail-style port 587
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+                server.ehlo()
+                if SMTP_USE_TLS:
+                    server.starttls()
+                    server.ehlo()
+                server.login(SMTP_USER, SMTP_PASS)
+                server.sendmail(SMTP_FROM, to_email, msg.as_string())
+
+        print(f"[EMAIL] Message sent successfully to {to_email}")
+
+    except smtplib.SMTPAuthenticationError as exc:
+        print(f"[EMAIL ERROR] SMTP authentication failed for {SMTP_USER}: {exc}")
+        print(f"[EMAIL FALLBACK] Code for {to_email}: {code}")
+    except smtplib.SMTPException as exc:
+        print(f"[EMAIL ERROR] SMTP error while sending to {to_email}: {exc}")
+        print(f"[EMAIL FALLBACK] Code for {to_email}: {code}")
+    except OSError as exc:
+        print(f"[EMAIL ERROR] Network error connecting to {SMTP_HOST}:{SMTP_PORT}: {exc}")
+        print(f"[EMAIL FALLBACK] Code for {to_email}: {code}")
     except Exception as exc:
-        print(f"[EMAIL ERROR] Не удалось отправить письмо на {to_email}: {exc}")
-        print(f"[DEV FALLBACK] Код для {to_email}: {code}")
+        print(f"[EMAIL ERROR] Unexpected error: {exc}")
+        print(f"[EMAIL FALLBACK] Code for {to_email}: {code}")
+
+
+def send_verification_email(to_email: str, code: str, purpose: str = "регистрации") -> None:
+    """Register/2FA wrapper: log purpose, then send via Mail.ru SMTP."""
+    print(f"[EMAIL] Sending verification code for {purpose}")
+    send_smtp_email(to_email, code)
 
 
 # ── Registration (two-step: init → verify) ────────────────────────────────────
