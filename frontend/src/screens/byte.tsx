@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, API_URL } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import HelloByte from '@/components/byte/helloByte';
 import Input from '@/components/byte/input';
@@ -25,6 +25,14 @@ import {
   createCrisisMessage,
   extractRiskFromResponse,
 } from '@/components/byte/crisis';
+import { useChatSync } from '../hooks/useChatSync';
+import {
+  GUEST_CHATS_KEY,
+  GUEST_FACTS_KEY,
+  USER_CHATS_KEY,
+  userChatsKey,
+  userFactsKey,
+} from '../storage/chatStorage';
 
 export interface Message {
   id: number;
@@ -41,16 +49,35 @@ interface Chat {
   messages: Message[];
 }
 
-const API_URL = Platform.OS === 'android' ? 'http://192.168.0.179:8000' : 'http://localhost:8000';
 const MAX_HISTORY = 15;
 
-// Separate keys for guest vs authenticated users.
-// This prepares the ground for the merge strategy (rules.md §3.5):
-// on login, guest data can be read from GUEST_* and merged with cloud data.
-const GUEST_CHATS_KEY  = '@byte_chats_guest';
-const USER_CHATS_KEY   = '@byte_chats';
-const GUEST_FACTS_KEY  = '@user_facts_guest';
-const USER_FACTS_KEY   = '@user_facts';
+function makeBlankChat(): Chat {
+  return {
+    id: Date.now().toString(),
+    title: 'Новый чат',
+    messages: [],
+  };
+}
+
+function parseChatList(raw: string | null): Chat[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item: Chat) => ({
+      id: String(item.id),
+      title: item.title || 'Новый чат',
+      messages: Array.isArray(item.messages) ? item.messages : [],
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function mergeChatLists(guest: Chat[], account: Chat[]): Chat[] {
+  const guestIds = new Set(guest.map(chat => chat.id));
+  return [...guest, ...account.filter(chat => !guestIds.has(chat.id))];
+}
 
 const Byte = () => {
   const insets = useSafeAreaInsets();
@@ -58,9 +85,7 @@ const Byte = () => {
   const tabBarHeight = useBottomTabBarHeight();
 
   // Auth state drives which AsyncStorage keys we read/write.
-  const { isAuthenticated } = useAuth();
-  const chatsKey = isAuthenticated ? USER_CHATS_KEY  : GUEST_CHATS_KEY;
-  const factsKey = isAuthenticated ? USER_FACTS_KEY  : GUEST_FACTS_KEY;
+  const { isAuthenticated, user } = useAuth();
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -68,6 +93,12 @@ const Byte = () => {
   const [isAtTop, setIsAtTop] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [facts, setFacts] = useState<string[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+
+  const { loadChats } = useChatSync(chats, currentChatId);
+  const sessionKey = isAuthenticated && user ? `user:${user.id}` : 'guest';
+  const loadedSession = useRef<string | null>(null);
+  const wasAuthenticated = useRef(isAuthenticated);
 
   const messagesCountRef = useRef(0);
   const isAtTopRef = useRef(isAtTop);
@@ -80,54 +111,99 @@ const Byte = () => {
 
   const currentMessages = chats.find(c => c.id === currentChatId)?.messages || [];
 
-  // Load chat history and facts from the correct storage bucket.
-  // For guests  → reads '@byte_chats_guest'  / '@user_facts_guest'
-  // For users   → reads '@byte_chats'        / '@user_facts'
-  // Runs again if auth state changes (e.g. user just logged in).
+  // Reload (or reset) chats whenever the auth session changes.
   useEffect(() => {
+    const loggedOut = wasAuthenticated.current && !isAuthenticated;
+    wasAuthenticated.current = isAuthenticated;
+
+    let cancelled = false;
+    loadedSession.current = null;
+    setHydrated(false);
+
+    const applyChats = (next: Chat[]) => {
+      const list = next.length > 0 ? next : [makeBlankChat()];
+      setChats(list);
+      setCurrentChatId(list[0].id);
+    };
+
     const loadData = async () => {
       try {
-        const storedChats = await AsyncStorage.getItem(chatsKey);
-        if (storedChats) {
-          const parsed: Chat[] = JSON.parse(storedChats);
-          setChats(parsed);
-          if (parsed.length > 0) {
-            setCurrentChatId(parsed[0].id);
-          } else {
-            createNewChat();
-          }
-        } else {
-          createNewChat();
+        if (loggedOut) {
+          applyChats([]);
+          setFacts([]);
+          setMenuOpen(false);
+          setLoading(false);
+          return;
         }
 
-        const storedFacts = await AsyncStorage.getItem(factsKey);
-        if (storedFacts) {
-          setFacts(JSON.parse(storedFacts));
+        if (!isAuthenticated || !user) {
+          const guestChats = parseChatList(await AsyncStorage.getItem(GUEST_CHATS_KEY));
+          const guestFacts = await AsyncStorage.getItem(GUEST_FACTS_KEY);
+          if (cancelled) return;
+          applyChats(guestChats);
+          setFacts(guestFacts ? JSON.parse(guestFacts) : []);
+          return;
+        }
+
+        const [guestChats, cloudRaw, userChatsRaw, legacyRaw, userFactsRaw, guestFactsRaw] =
+          await Promise.all([
+            AsyncStorage.getItem(GUEST_CHATS_KEY).then(parseChatList),
+            loadChats(),
+            AsyncStorage.getItem(userChatsKey(user.id)),
+            AsyncStorage.getItem(USER_CHATS_KEY),
+            AsyncStorage.getItem(userFactsKey(user.id)),
+            AsyncStorage.getItem(GUEST_FACTS_KEY),
+          ]);
+        if (cancelled) return;
+
+        const cloudChats = Array.isArray(cloudRaw) ? parseChatList(JSON.stringify(cloudRaw)) : [];
+        const localUserChats = parseChatList(userChatsRaw || legacyRaw);
+        applyChats(mergeChatLists(guestChats, cloudChats.length > 0 ? cloudChats : localUserChats));
+
+        const factsRaw = userFactsRaw || guestFactsRaw;
+        setFacts(factsRaw ? JSON.parse(factsRaw) : []);
+
+        if (guestChats.length > 0) {
+          await AsyncStorage.multiRemove([GUEST_CHATS_KEY, GUEST_FACTS_KEY]);
         }
       } catch (e) {
         console.warn('Failed to load data', e);
-        createNewChat();
+        if (!cancelled) applyChats([]);
+      } finally {
+        if (!cancelled) {
+          loadedSession.current = sessionKey;
+          setHydrated(true);
+        }
       }
     };
+
     loadData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatsKey]); // reload when guest → authenticated (key changes)
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey]);
 
-  // Persist every chat update to the correct bucket.
+  // Persist to the active session bucket only after that session has hydrated.
   useEffect(() => {
+    if (!hydrated || loadedSession.current !== sessionKey) return;
+    const key = isAuthenticated && user ? userChatsKey(user.id) : GUEST_CHATS_KEY;
     if (chats.length > 0) {
-      AsyncStorage.setItem(chatsKey, JSON.stringify(chats)).catch(console.warn);
-    }
-  }, [chats, chatsKey]);
-
-  // Persist facts to the correct bucket.
-  useEffect(() => {
-    if (facts.length > 0) {
-      AsyncStorage.setItem(factsKey, JSON.stringify(facts)).catch(console.warn);
+      AsyncStorage.setItem(key, JSON.stringify(chats)).catch(console.warn);
     } else {
-      AsyncStorage.removeItem(factsKey).catch(console.warn);
+      AsyncStorage.removeItem(key).catch(console.warn);
     }
-  }, [facts, factsKey]);
+  }, [chats, hydrated, sessionKey, isAuthenticated, user]);
+
+  useEffect(() => {
+    if (!hydrated || loadedSession.current !== sessionKey) return;
+    const key = isAuthenticated && user ? userFactsKey(user.id) : GUEST_FACTS_KEY;
+    if (facts.length > 0) {
+      AsyncStorage.setItem(key, JSON.stringify(facts)).catch(console.warn);
+    } else {
+      AsyncStorage.removeItem(key).catch(console.warn);
+    }
+  }, [facts, hydrated, sessionKey, isAuthenticated, user]);
 
   const createNewChat = () => {
     const newChat: Chat = {

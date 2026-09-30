@@ -5,6 +5,7 @@ import {
   NstuImportModal,
   type CabinetPageType,
 } from '../components/NstuImportModal';
+import { clearDepartedUserChatCache } from '../storage/chatStorage';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -199,14 +200,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // ── Logout / Delete ───────────────────────────────────────────────────────────
 
   const logout = async () => {
+    const departedUserId = user?.id ?? null;
     tokenRef.current = null;
     dailySyncChecked.current = false;
     setAutoSyncVisible(false);
     setSyncStatus('idle');
     setUser(null);
     setToken(null);
-    await AsyncStorage.removeItem('@auth_token');
-    await AsyncStorage.removeItem('@auth_user');
+    await AsyncStorage.multiRemove(['@auth_token', '@auth_user']);
+    await clearDepartedUserChatCache(departedUserId);
   };
 
   const deleteAccount = async () => {

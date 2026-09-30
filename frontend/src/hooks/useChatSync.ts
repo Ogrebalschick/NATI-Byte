@@ -1,16 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { Platform } from 'react-native';
+import { useAuth, API_URL } from '../context/AuthContext';
 
 interface Chat {
   id: string;
   title: string;
   messages: any[];
 }
-
-const API_URL = Platform.OS === 'android' 
-  ? 'http://192.168.0.179:8000' 
-  : 'http://localhost:8000';
 
 export const useChatSync = (chats: Chat[], currentChatId: string | null) => {
   const { token, isAuthenticated } = useAuth();
