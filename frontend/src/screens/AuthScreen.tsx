@@ -9,11 +9,13 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Eye, EyeOff, Mail, ArrowLeft } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
+import { NstuImportModal } from '../components/NstuImportModal';
 
 // ── Step type ──────────────────────────────────────────────────────────────────
 // 'login'            — login form
@@ -36,17 +38,26 @@ const AuthScreen = () => {
   // Password visibility toggles
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
+  const [importImmediately, setImportImmediately] = useState(true);
+  const [isWebViewVisible, setIsWebViewVisible] = useState(false);
 
-  // Stores email across the verify steps so user doesn't have to re-type
   const pendingEmail = useRef('');
 
-  const { login, verifyLogin, requestRegisterCode, verifyRegister, isAuthenticated } = useAuth();
+  const {
+    login,
+    verifyLogin,
+    requestRegisterCode,
+    verifyRegister,
+    isAuthenticated,
+    nstuLogin,
+    parseCabinet,
+  } = useAuth();
   const router = useRouter();
 
-  // Auto-redirect when auth state becomes true (after successful verify/login)
+  // Don't pop the screen while the NSTU WebView is still scraping.
   useEffect(() => {
-    if (isAuthenticated) router.back();
-  }, [isAuthenticated]);
+    if (isAuthenticated && !isWebViewVisible) router.back();
+  }, [isAuthenticated, isWebViewVisible]);
 
   const showError = (msg: string) => setErrorMessage(msg);
   const clearError = () => setErrorMessage(null);
@@ -274,6 +285,20 @@ const AuthScreen = () => {
         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Войти</Text>}
       </TouchableOpacity>
 
+      <View style={styles.dividerRow}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>или</Text>
+        <View style={styles.dividerLine} />
+      </View>
+
+      <TouchableOpacity
+        style={styles.nstuButton}
+        onPress={() => setIsWebViewVisible(true)}
+        disabled={loading}
+      >
+        <Text style={styles.nstuButtonText}>Войти через NSTU ID</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.switchButton} onPress={switchToRegister}>
         <Text style={styles.switchText}>Нет аккаунта? Зарегистрируйтесь</Text>
       </TouchableOpacity>
@@ -371,6 +396,35 @@ const AuthScreen = () => {
         }
       </TouchableOpacity>
 
+      <View style={styles.dividerRow}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>или</Text>
+        <View style={styles.dividerLine} />
+      </View>
+
+      <View style={styles.importToggle}>
+        <View style={styles.importToggleText}>
+          <Text style={styles.importToggleTitle}>Импортировать данные сразу</Text>
+          <Text style={styles.importToggleHint}>
+            BYTE автоматически соберёт ваше расписание, группу и ФИО. Вы можете сделать это позже в настройках.
+          </Text>
+        </View>
+        <Switch
+          value={importImmediately}
+          onValueChange={setImportImmediately}
+          trackColor={{ false: '#3a3a3c', true: '#007AFF' }}
+          thumbColor="#fff"
+        />
+      </View>
+
+      <TouchableOpacity
+        style={styles.nstuButton}
+        onPress={() => setIsWebViewVisible(true)}
+        disabled={loading}
+      >
+        <Text style={styles.nstuButtonText}>Зарегистрироваться через NSTU ID</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.switchButton} onPress={switchToLogin}>
         <Text style={styles.switchText}>Уже есть аккаунт? Войдите</Text>
       </TouchableOpacity>
@@ -400,6 +454,16 @@ const AuthScreen = () => {
           {isVerifyStep                && renderVerifyStep()}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <NstuImportModal
+        visible={isWebViewVisible}
+        mode="nstu-auth"
+        importImmediately={step === 'register' ? importImmediately : false}
+        onClose={() => setIsWebViewVisible(false)}
+        onNstuLogin={nstuLogin}
+        onScraped={parseCabinet}
+        onFinished={() => setIsWebViewVisible(false)}
+      />
     </ScreenWrapper>
   );
 };
@@ -463,6 +527,35 @@ const styles = StyleSheet.create({
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   switchButton: { marginTop: 16, alignItems: 'center' },
   switchText: { color: '#007AFF', fontSize: 14 },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 22,
+    marginBottom: 6,
+  },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: '#2C2D2E' },
+  dividerText: { color: '#636366', fontSize: 12 },
+  nstuButton: {
+    backgroundColor: '#1E1F20',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  nstuButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  importToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  importToggleText: { flex: 1 },
+  importToggleTitle: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  importToggleHint: { color: '#8e8e93', fontSize: 12, lineHeight: 17 },
 
   // Verify step specific
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 32 },

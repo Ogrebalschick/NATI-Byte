@@ -225,6 +225,8 @@ const ChangePasswordModal = ({
       setError(err.message || 'Не удалось отправить код повторно');
     }
   };
+
+  const handleSubmit = async () => {
     if (!passwordsMatch) {
       setError('Пароли не совпадают');
       return;
@@ -364,7 +366,123 @@ const ChangePasswordModal = ({
   );
 };
 
-const AuthenticatedProfile = () => {
+interface CreatePasswordModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (password: string) => Promise<void>;
+}
+
+const CreatePasswordModal = ({ visible, onClose, onSubmit }: CreatePasswordModalProps) => {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const mismatch = confirm.length > 0 && password !== confirm;
+  const canSubmit = password.length >= 6 && password === confirm && !loading;
+
+  const handleClose = () => {
+    setPassword('');
+    setConfirm('');
+    setError(null);
+    setShowNew(false);
+    setShowConfirm(false);
+    onClose();
+  };
+
+  const handleSubmit = async () => {
+    if (password !== confirm) {
+      setError('Пароли не совпадают');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await onSubmit(password);
+      handleClose();
+    } catch (err: any) {
+      setError(err.message || 'Не удалось сохранить пароль');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+      <KeyboardAvoidingView
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.modalBox}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalLockIcon}>
+              <Ionicons name="key-outline" size={28} color="#007AFF" />
+            </View>
+            <Text style={styles.modalTitle}>Создать пароль BYTE</Text>
+          </View>
+          <Text style={styles.modalBody}>
+            После этого вы сможете входить в приложение без сайта университета.
+          </Text>
+
+          <Text style={styles.modalFieldLabel}>Придумайте пароль</Text>
+          <View style={styles.passwordWrapper}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Минимум 6 символов"
+              placeholderTextColor="#636366"
+              value={password}
+              onChangeText={text => { setPassword(text); setError(null); }}
+              secureTextEntry={!showNew}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity style={styles.eyeButton} onPress={() => setShowNew(p => !p)}>
+              {showNew ? <EyeOff size={20} color="#8e8e93" /> : <Eye size={20} color="#8e8e93" />}
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.modalFieldLabel}>Повторите пароль</Text>
+          <View style={styles.passwordWrapper}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Повторите пароль"
+              placeholderTextColor="#636366"
+              value={confirm}
+              onChangeText={text => { setConfirm(text); setError(null); }}
+              secureTextEntry={!showConfirm}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity style={styles.eyeButton} onPress={() => setShowConfirm(p => !p)}>
+              {showConfirm ? <EyeOff size={20} color="#8e8e93" /> : <Eye size={20} color="#8e8e93" />}
+            </TouchableOpacity>
+          </View>
+          {mismatch && <Text style={styles.fieldError}>Пароли не совпадают</Text>}
+
+          {error && (
+            <View style={styles.modalError}>
+              <Text style={styles.modalErrorText}>{error}</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.modalSaveButton, !canSubmit && styles.modalDeleteButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={!canSubmit}
+          >
+            {loading
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={styles.modalDeleteButtonText}>Сохранить пароль</Text>
+            }
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.modalCancelButton} onPress={handleClose}>
+            <Text style={styles.modalCancelText}>Отмена</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+};
   const {
     user,
     logout,
@@ -373,10 +491,12 @@ const AuthenticatedProfile = () => {
     requestPasswordReset,
     confirmPasswordReset,
     parseCabinet,
+    setPassword,
   } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
   const [passwordRequestLoading, setPasswordRequestLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isWebViewVisible, setIsWebViewVisible] = useState(false);
@@ -450,6 +570,20 @@ const AuthenticatedProfile = () => {
         <View style={styles.successBanner}>
           <Ionicons name="checkmark-circle" size={18} color="#30D158" />
           <Text style={styles.successBannerText}>{successMessage}</Text>
+        </View>
+      )}
+
+      {user?.has_password === false && (
+        <View style={styles.nstuBanner}>
+          <Ionicons name="information-circle-outline" size={22} color="#FFD60A" />
+          <View style={styles.nstuBannerTextCol}>
+            <Text style={styles.nstuBannerText}>
+              Вы вошли через NSTU ID. Установите пароль для BYTE, чтобы входить напрямую без авторизации на сайте университета.
+            </Text>
+            <TouchableOpacity style={styles.nstuBannerButton} onPress={() => setShowCreatePassword(true)}>
+              <Text style={styles.nstuBannerButtonText}>Создать пароль</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -557,6 +691,15 @@ const AuthenticatedProfile = () => {
         onClose={() => setIsWebViewVisible(false)}
         onScraped={parseCabinet}
         onFinished={handleNstuFinished}
+      />
+
+      <CreatePasswordModal
+        visible={showCreatePassword}
+        onClose={() => setShowCreatePassword(false)}
+        onSubmit={async (pwd) => {
+          await setPassword(pwd);
+          setSuccessMessage('Пароль успешно установлен');
+        }}
       />
 
       <ChangePasswordModal
@@ -721,6 +864,27 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   successBannerText: { color: '#30D158', fontSize: 15, fontWeight: '600', flex: 1 },
+  nstuBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(255, 214, 10, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 214, 10, 0.35)',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 16,
+  },
+  nstuBannerTextCol: { flex: 1 },
+  nstuBannerText: { color: '#FFE08A', fontSize: 13, lineHeight: 19, marginBottom: 10 },
+  nstuBannerButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFD60A',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  nstuBannerButtonText: { color: '#1C1C1E', fontSize: 14, fontWeight: '700' },
 
   // ── Delete modal ──
   modalOverlay: {

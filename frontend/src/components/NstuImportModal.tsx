@@ -40,7 +40,14 @@ function scrapeScript(type: 'profile' | 'timetable') {
     (function() {
       try {
         var text = (document.body && document.body.innerText) ? document.body.innerText : '';
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: '${type}', text: text }));
+        var email = '';
+        var stud = text.match(/[A-Za-z0-9._%+\\-]+@stud\\.nstu\\.ru/i);
+        if (stud) { email = stud[0]; }
+        else {
+          var any = text.match(/[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}/);
+          if (any) { email = any[0]; }
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: '${type}', text: text, email: email }));
       } catch (e) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', text: String(e) }));
       }
@@ -58,14 +65,34 @@ function navigateScript(url: string) {
   `;
 }
 
+export function extractEmailFromCabinetText(text: string): string | null {
+  const stud = text.match(/[A-Za-z0-9._%+-]+@stud\.nstu\.ru/i);
+  if (stud) return stud[0].toLowerCase();
+  const any = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+  return any ? any[0].toLowerCase() : null;
+}
+
 interface NstuImportModalProps {
   visible: boolean;
   onClose: () => void;
+  /** 'sync' = already logged into BYTE; 'nstu-auth' = login/register via NSTU ID first. */
+  mode?: 'sync' | 'nstu-auth';
+  /** When mode is nstu-auth, also scrape timetable/profile into /sync/parse-cabinet. */
+  importImmediately?: boolean;
+  onNstuLogin?: (email: string) => Promise<void>;
   onScraped: (pageType: 'profile' | 'timetable', rawText: string) => Promise<void>;
   onFinished: () => void;
 }
 
-export const NstuImportModal = ({ visible, onClose, onScraped, onFinished }: NstuImportModalProps) => {
+export const NstuImportModal = ({
+  visible,
+  onClose,
+  mode = 'sync',
+  importImmediately = true,
+  onNstuLogin,
+  onScraped,
+  onFinished,
+}: NstuImportModalProps) => {
   const insets = useSafeAreaInsets();
   const webRef = useRef<WebView>(null);
   const phaseRef = useRef<ScrapePhase>('awaiting_login');
@@ -131,7 +158,7 @@ export const NstuImportModal = ({ visible, onClose, onScraped, onFinished }: Nst
 
   const handleMessage = async (raw: string) => {
     if (sendingRef.current) return;
-    let parsed: { type?: string; text?: string } = {};
+    let parsed: { type?: string; text?: string; email?: string } = {};
     try {
       parsed = JSON.parse(raw);
     } catch {
@@ -153,15 +180,35 @@ export const NstuImportModal = ({ visible, onClose, onScraped, onFinished }: Nst
     setStatus('saving');
     setError(null);
     try {
-      await onScraped(parsed.type, parsed.text);
-      if (parsed.type === 'profile') {
-        phaseRef.current = 'goto_timetable';
-        lastScrapeUrl.current = '';
-        setStatus('timetable');
-        webRef.current?.injectJavaScript(navigateScript(TIMETABLE_URL));
+      if (parsed.type === 'profile' && mode === 'nstu-auth') {
+        const email = (parsed.email || extractEmailFromCabinetText(parsed.text) || '').trim();
+        if (!email) {
+          throw new Error('Не удалось найти email в контактных данных личного кабинета');
+        }
+        if (onNstuLogin) {
+          await onNstuLogin(email);
+        }
+        if (importImmediately) {
+          await onScraped('profile', parsed.text);
+          phaseRef.current = 'goto_timetable';
+          lastScrapeUrl.current = '';
+          setStatus('timetable');
+          webRef.current?.injectJavaScript(navigateScript(TIMETABLE_URL));
+        } else {
+          phaseRef.current = 'done';
+          onFinished();
+        }
       } else {
-        phaseRef.current = 'done';
-        onFinished();
+        await onScraped(parsed.type, parsed.text);
+        if (parsed.type === 'profile') {
+          phaseRef.current = 'goto_timetable';
+          lastScrapeUrl.current = '';
+          setStatus('timetable');
+          webRef.current?.injectJavaScript(navigateScript(TIMETABLE_URL));
+        } else {
+          phaseRef.current = 'done';
+          onFinished();
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Не удалось отправить данные на сервер');

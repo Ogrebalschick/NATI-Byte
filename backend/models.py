@@ -72,6 +72,16 @@ class CabinetParseRequest(BaseModel):
     raw_text: str
 
 
+class NstuLoginRequest(BaseModel):
+    """One-click login / register via NSTU ID (email scraped from the cabinet)."""
+    email: EmailStr
+
+
+class SetPasswordRequest(BaseModel):
+    """First-time BYTE password for NSTU-ID accounts that have an empty hash."""
+    new_password: str
+
+
 # Kept for backward-compat (internal use)
 class UserCreate(BaseModel):
     email: EmailStr

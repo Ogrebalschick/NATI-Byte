@@ -12,6 +12,7 @@ interface User {
   full_name?: string | null;
   student_group?: string | null;
   is_synced_with_nstu?: boolean;
+  has_password?: boolean;
 }
 
 interface AuthContextType {
@@ -36,6 +37,8 @@ interface AuthContextType {
   requestPasswordReset: () => Promise<void>;
   confirmPasswordReset: (code: string, newPassword: string) => Promise<void>;
   parseCabinet: (pageType: 'profile' | 'timetable', rawText: string) => Promise<any>;
+  nstuLogin: (email: string) => Promise<void>;
+  setPassword: (newPassword: string) => Promise<void>;
 }
 
 // ── Context setup ──────────────────────────────────────────────────────────────
@@ -53,6 +56,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const tokenRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     loadStoredData();
@@ -63,8 +67,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const storedToken = await AsyncStorage.getItem('@auth_token');
       const storedUser = await AsyncStorage.getItem('@auth_user');
       if (storedToken && storedUser) {
+        tokenRef.current = storedToken;
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
+        try {
+          const meRes = await fetch(`${API_URL}/auth/me`, {
+            headers: { Authorization: `Bearer ${storedToken}` },
+          });
+          if (meRes.ok) {
+            const me = await meRes.json();
+            const merged = { ...JSON.parse(storedUser), ...me };
+            setUser(merged);
+            await AsyncStorage.setItem('@auth_user', JSON.stringify(merged));
+          }
+        } catch {
+          // Keep cached user if /me is unreachable
+        }
       }
     } catch (error) {
       console.warn('Failed to load auth data', error);
@@ -75,6 +93,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   /** Persist token + user to memory and AsyncStorage. */
   const persistAuth = async (accessToken: string, userData: User) => {
+    tokenRef.current = accessToken;
     setUser(userData);
     setToken(accessToken);
     await AsyncStorage.setItem('@auth_token', accessToken);
@@ -158,6 +177,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // ── Logout / Delete ───────────────────────────────────────────────────────────
 
   const logout = async () => {
+    tokenRef.current = null;
     setUser(null);
     setToken(null);
     await AsyncStorage.removeItem('@auth_token');
@@ -225,15 +245,62 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const err = await response.json();
       throw new Error(err.detail || 'Не удалось изменить пароль');
     }
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, has_password: true };
+      AsyncStorage.setItem('@auth_user', JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
+  };
+
+  const nstuLogin = async (email: string) => {
+    const response = await fetch(`${API_URL}/auth/nstu-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Не удалось войти через NSTU ID');
+    }
+    const data = await response.json();
+    await persistAuth(data.access_token, {
+      ...data.user,
+      has_password: data.has_password ?? data.user?.has_password ?? false,
+    });
+  };
+
+  const setPassword = async (newPassword: string) => {
+    const authToken = tokenRef.current;
+    if (!authToken) throw new Error('Вы не авторизованы');
+    const response = await fetch(`${API_URL}/auth/set-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || 'Не удалось установить пароль');
+    }
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, has_password: true };
+      AsyncStorage.setItem('@auth_user', JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
   };
 
   const parseCabinet = async (pageType: 'profile' | 'timetable', rawText: string) => {
-    if (!token) throw new Error('Вы не авторизованы');
+    const authToken = tokenRef.current;
+    if (!authToken) throw new Error('Вы не авторизованы');
     const response = await fetch(`${API_URL}/sync/parse-cabinet`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify({ page_type: pageType, raw_text: rawText }),
     });
@@ -273,6 +340,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         requestPasswordReset,
         confirmPasswordReset,
         parseCabinet,
+        nstuLogin,
+        setPassword,
       }}
     >
       {children}

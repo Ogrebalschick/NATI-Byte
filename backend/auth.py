@@ -17,7 +17,10 @@ from models import (
     UserLogin, VerifyLogin,
     UserResponse, ChatSave, Set2FARequest,
     PasswordResetConfirm,
+    NstuLoginRequest,
+    SetPasswordRequest,
 )
+
 from database import get_db, User, Chat
 
 load_dotenv()
@@ -85,12 +88,19 @@ def decode_token(token: str) -> dict:
 def generate_code() -> str:
     return str(random.randint(100000, 999999))
 
+def _has_password(user: User) -> bool:
+    return bool(user.password_hash and str(user.password_hash).strip())
+
 def _user_to_dict(user: User) -> dict:
     return {
         "id": user.id,
         "email": user.email,
         "name": user.name,
         "is_2fa_enabled": bool(user.is_2fa_enabled),
+        "full_name": user.full_name,
+        "student_group": user.student_group,
+        "is_synced_with_nstu": bool(user.is_synced_with_nstu),
+        "has_password": _has_password(user),
     }
 
 
@@ -271,7 +281,7 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
     - If 2FA is enabled: dispatches a code and returns {"status": "requires_verification"}.
     """
     user = db.query(User).filter(User.email == data.email).first()
-    if not user or not verify_password(data.password, user.password_hash):
+    if not user or not _has_password(user) or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Неверный email или пароль")
 
     if user.is_2fa_enabled:
@@ -290,6 +300,45 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
     return {
         "access_token": token,
         "token_type": "bearer",
+        "has_password": _has_password(user),
+        "user": _user_to_dict(user),
+    }
+
+
+@router.post("/nstu-login")
+def nstu_login(data: NstuLoginRequest, db: Session = Depends(get_db)):
+    """
+    One-click login / register using an email scraped from the NSTU cabinet.
+    New accounts are created without a BYTE password (has_password=False).
+    """
+    email = str(data.email).strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    created = False
+
+    if not user:
+        local_part = email.split("@")[0]
+        user = User(
+            email=email,
+            password_hash="",
+            name=local_part or "Студент НГТУ",
+            is_synced_with_nstu=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        created = True
+        print(f"[AUTH] NSTU ID registered user_id={user.id} email={email}")
+    else:
+        user.is_synced_with_nstu = True
+        db.commit()
+        print(f"[AUTH] NSTU ID login user_id={user.id} email={email}")
+
+    token = create_access_token({"sub": user.email, "id": user.id})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "has_password": _has_password(user),
+        "created": created,
         "user": _user_to_dict(user),
     }
 
@@ -437,7 +486,28 @@ def password_reset_confirm(
     with _store_lock:
         _pending_password.pop(user.id, None)
 
-    return {"status": "updated", "message": "Пароль успешно изменён"}
+    return {"status": "updated", "has_password": True, "message": "Пароль успешно изменён"}
+
+
+@router.post("/set-password")
+def set_password(
+    data: SetPasswordRequest,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Set a BYTE password for NSTU-ID accounts that currently have an empty hash."""
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 6 символов")
+
+    payload = decode_token(token)
+    user = db.query(User).filter(User.id == payload["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.password_hash = get_password_hash(data.new_password)
+    db.commit()
+    print(f"[AUTH] Password set for user_id={user.id}")
+    return {"status": "updated", "has_password": True, "message": "Пароль успешно установлен"}
 
 
 @router.post("/chats/save")
