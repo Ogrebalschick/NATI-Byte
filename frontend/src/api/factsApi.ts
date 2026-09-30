@@ -86,7 +86,7 @@ const ENDINGS = [
   'ать', 'ять', 'ить', 'еть', 'ться', 'ть', 'ся',
 ];
 
-function normalizeFact(text: string): string {
+function normalizeFactText(text: string): string {
   return text
     .toLowerCase()
     .replace(/ё/g, 'е')
@@ -109,7 +109,7 @@ function stemWord(word: string): string {
 
 function factTokens(text: string): Set<string> {
   const tokens = new Set<string>();
-  for (const word of normalizeFact(text).match(/[a-zа-я0-9]+(?:-[a-zа-я0-9]+)*/g) ?? []) {
+  for (const word of normalizeFactText(text).match(/[a-zа-я0-9]+(?:-[a-zа-я0-9]+)*/g) ?? []) {
     if (STOP_WORDS.has(word)) continue;
     if (word.length < 3 && !/\d/.test(word)) continue;
     tokens.add(/\d/.test(word) ? word : stemWord(word));
@@ -119,8 +119,8 @@ function factTokens(text: string): Set<string> {
 
 /** True when `candidate` adds nothing beyond `stored`, including a rephrase. */
 export function sameFact(candidate: string, stored: string): boolean {
-  const left = normalizeFact(candidate);
-  const right = normalizeFact(stored);
+  const left = normalizeFactText(candidate);
+  const right = normalizeFactText(stored);
   if (!left || !right) return false;
   if (left === right) return true;
   const candidateTokens = factTokens(candidate);
