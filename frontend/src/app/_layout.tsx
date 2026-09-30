@@ -1,51 +1,35 @@
-// Полифилл Node-модуля punycode для markdown-it (Metro не включает Node stdlib)
+// Polyfill for Node's 'punycode' module — required by markdown-it, absent in Metro.
 import 'punycode/';
 
+// Per rules.md §3.1 — Guest Mode Support:
+// The app must boot directly into the tab navigator. Auth must never
+// block initial access. The auth wall lives only inside ProfileScreen.
 import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { NavigationBar } from 'expo-navigation-bar';
-import { AuthProvider, useAuth } from '../context/AuthContext';
-
-/**
- * Навигатор с встроенным auth-guard.
- * Должен рендериться ВНУТРИ AuthProvider, чтобы useAuth() работал.
- */
-function RootNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
-  const router = useRouter();
-  const segments = useSegments();
-
-  useEffect(() => {
-    if (isLoading) return;
-
-    const inTabs = segments[0] === '(tabs)';
-    const inAuth = segments[0] === 'auth';
-
-    if (!isAuthenticated && !inAuth) {
-      // Не авторизован — на экран входа
-      router.replace('/auth');
-    } else if (isAuthenticated && !inTabs) {
-      // Авторизован — в табы
-      router.replace('/(tabs)/chat');
-    }
-  }, [isAuthenticated, isLoading]);
-
-  return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="auth" />
-    </Stack>
-  );
-}
+import { Platform } from 'react-native';
+import { Stack } from 'expo-router';
+import * as NavigationBar from 'expo-navigation-bar';
+import { AuthProvider } from '../context/AuthContext';
 
 export default function RootLayout() {
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    // SDK 57 removed setBackgroundColorAsync / setPositionAsync / setButtonStyleAsync.
+    // The only available runtime method is setStyle (synchronous):
+    //   'dark'  = dark navigation bar with light (white) icons — matches our dark theme.
+    // Background colour (#1C1C1E) is locked at build time via
+    // app.json → "androidNavigationBar.backgroundColor".
+    NavigationBar.setStyle('dark');
+  }, []);
+
   return (
     <AuthProvider>
-      {/* SDK 57: NavigationBar — декларативный компонент.
-          style="dark" = тёмный фон, светлые иконки (аналог старого setButtonStyleAsync('light')).
-          Прозрачный фон уже задан через androidStatusBar.backgroundColor в app.json. */}
-      <NavigationBar style="dark" />
-      <RootNavigator />
+      <Stack screenOptions={{ headerShown: false }}>
+        {/* index.tsx redirects straight to /(tabs)/chat for all users */}
+        <Stack.Screen name="index" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="auth" />
+      </Stack>
     </AuthProvider>
   );
 }

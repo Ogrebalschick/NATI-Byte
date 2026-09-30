@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import HelloByte from '@/components/byte/helloByte';
 import Input from '@/components/byte/input';
@@ -42,13 +43,24 @@ interface Chat {
 
 const API_URL = Platform.OS === 'android' ? 'http://192.168.0.179:8000' : 'http://localhost:8000';
 const MAX_HISTORY = 15;
-const STORAGE_KEY = '@byte_chats';
-const FACTS_STORAGE_KEY = '@user_facts';
+
+// Separate keys for guest vs authenticated users.
+// This prepares the ground for the merge strategy (rules.md §3.5):
+// on login, guest data can be read from GUEST_* and merged with cloud data.
+const GUEST_CHATS_KEY  = '@byte_chats_guest';
+const USER_CHATS_KEY   = '@byte_chats';
+const GUEST_FACTS_KEY  = '@user_facts_guest';
+const USER_FACTS_KEY   = '@user_facts';
 
 const Byte = () => {
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom;
   const tabBarHeight = useBottomTabBarHeight();
+
+  // Auth state drives which AsyncStorage keys we read/write.
+  const { isAuthenticated } = useAuth();
+  const chatsKey = isAuthenticated ? USER_CHATS_KEY  : GUEST_CHATS_KEY;
+  const factsKey = isAuthenticated ? USER_FACTS_KEY  : GUEST_FACTS_KEY;
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -68,10 +80,14 @@ const Byte = () => {
 
   const currentMessages = chats.find(c => c.id === currentChatId)?.messages || [];
 
+  // Load chat history and facts from the correct storage bucket.
+  // For guests  → reads '@byte_chats_guest'  / '@user_facts_guest'
+  // For users   → reads '@byte_chats'        / '@user_facts'
+  // Runs again if auth state changes (e.g. user just logged in).
   useEffect(() => {
     const loadData = async () => {
       try {
-        const storedChats = await AsyncStorage.getItem(STORAGE_KEY);
+        const storedChats = await AsyncStorage.getItem(chatsKey);
         if (storedChats) {
           const parsed: Chat[] = JSON.parse(storedChats);
           setChats(parsed);
@@ -84,7 +100,7 @@ const Byte = () => {
           createNewChat();
         }
 
-        const storedFacts = await AsyncStorage.getItem(FACTS_STORAGE_KEY);
+        const storedFacts = await AsyncStorage.getItem(factsKey);
         if (storedFacts) {
           setFacts(JSON.parse(storedFacts));
         }
@@ -94,21 +110,24 @@ const Byte = () => {
       }
     };
     loadData();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatsKey]); // reload when guest → authenticated (key changes)
 
+  // Persist every chat update to the correct bucket.
   useEffect(() => {
     if (chats.length > 0) {
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(chats)).catch(console.warn);
+      AsyncStorage.setItem(chatsKey, JSON.stringify(chats)).catch(console.warn);
     }
-  }, [chats]);
+  }, [chats, chatsKey]);
 
+  // Persist facts to the correct bucket.
   useEffect(() => {
     if (facts.length > 0) {
-      AsyncStorage.setItem(FACTS_STORAGE_KEY, JSON.stringify(facts)).catch(console.warn);
+      AsyncStorage.setItem(factsKey, JSON.stringify(facts)).catch(console.warn);
     } else {
-      AsyncStorage.removeItem(FACTS_STORAGE_KEY).catch(console.warn);
+      AsyncStorage.removeItem(factsKey).catch(console.warn);
     }
-  }, [facts]);
+  }, [facts, factsKey]);
 
   const createNewChat = () => {
     const newChat: Chat = {
@@ -386,10 +405,14 @@ const Byte = () => {
   };
 
   const hasMessages = currentMessages.length > 0;
+  // listBottomOffset keeps the last message above the Input bar.
+  // tabBarHeight is added so the Input itself clears the floating tab bar.
   const listBottomOffset = inputHeight + 8;
 
   return (
     <ScreenWrapper>
+      {/* Tab bar is in normal flow — it pushes content up automatically.
+          No manual paddingBottom needed here. */}
       <View style={styles.container}>
         <TouchableOpacity style={[styles.burgerButton, { top: insets.top + 8 }]} onPress={toggleMenu}>
           <Ionicons name="menu" size={28} color="#fff" />

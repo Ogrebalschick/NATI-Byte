@@ -19,55 +19,7 @@ import { Platform } from 'react-native';
 const BottomTabNavigator = () => {
 
   return (
-    <Tabs
-      screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap = 'help-circle';
-
-          switch (route.name) {
-            case 'Статистика':
-              iconName = focused ? 'stats-chart' : 'stats-chart-outline';
-              break;
-            case 'Список дел':
-              iconName = focused ? 'checkbox' : 'checkbox-outline';
-              break;
-            case 'Чат':
-              iconName = focused ? 'chatbubble' : 'chatbubble-outline';
-              break;
-            case 'Заметки':
-              iconName = focused ? 'document-text' : 'document-text-outline';
-              break;
-            case 'Профиль':
-              iconName = focused ? 'person' : 'person-outline';
-              break;
-            default:
-              iconName = 'help-circle';
-          }
-
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: '#007AFF',
-        tabBarInactiveTintColor: '#8E8E93',
-        tabBarStyle: {
-          backgroundColor: '#1C1C1E',
-          borderTopColor: '#3A3A3C',
-          height: Platform.OS === 'ios' ? 85 : 60,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 8,
-          paddingTop: 8,
-        },
-        headerShown: false,
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '500',
-        },
-      })}
-    >
-      <Tabs.Screen name="statistics" options={{ title: 'Статистика' }} />
-      <Tabs.Screen name="todos"      options={{ title: 'Список дел' }} />
-      <Tabs.Screen name="chat"       options={{ title: 'Чат' }} />
-      <Tabs.Screen name="notes"      options={{ title: 'Заметки' }} />
-      <Tabs.Screen name="profile"    options={{ title: 'Профиль' }} />
-    </Tabs>
+    <></>
   );
 };
 

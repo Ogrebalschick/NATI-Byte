@@ -14,9 +14,9 @@
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/nstu.png",
-        "backgroundImage": "./assets/images/nstu.png",
-        "softwareKeyboardLayoutMode": "resize"
+        "backgroundImage": "./assets/images/nstu.png"
       },
+      "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
       "usesCleartextTraffic": true,
       "package": "com.argonaft.Byte"
@@ -24,6 +24,10 @@
     "androidStatusBar": {
       "translucent": true,
       "backgroundColor": "#00000000"
+    },
+    "androidNavigationBar": {
+      "backgroundColor": "#1C1C1E",
+      "barStyle": "light-content"
     },
     "web": {
       "output": "static",
