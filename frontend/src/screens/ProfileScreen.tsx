@@ -483,6 +483,8 @@ const CreatePasswordModal = ({ visible, onClose, onSubmit }: CreatePasswordModal
     </Modal>
   );
 };
+
+const AuthenticatedProfile = () => {
   const {
     user,
     logout,
