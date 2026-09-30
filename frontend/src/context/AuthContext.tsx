@@ -13,6 +13,8 @@ export type SyncStatus = 'idle' | 'syncing' | 'error_auth' | 'success';
 
 const LAST_SYNC_KEY = '@last_sync_date';
 const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const PROFILE_REVIEW_KEY = '@last_profile_review_date';
+const PROFILE_REVIEW_MS = 180 * 24 * 60 * 60 * 1000;
 
 export type StudentDataSnapshot = {
   payload: Record<string, unknown>;
@@ -60,6 +62,9 @@ interface AuthContextType {
   markLastSync: () => Promise<void>;
   getStudentData: (types?: string[]) => Promise<StudentDataMap>;
   dismissSyncStatus: () => void;
+  /** True when the signed-in user has not confirmed profile facts for 180 days. */
+  showReviewBanner: boolean;
+  confirmProfileReview: () => Promise<void>;
 }
 // ── Context setup ──────────────────────────────────────────────────────────────
 
@@ -78,6 +83,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [autoSyncVisible, setAutoSyncVisible] = useState(false);
+  const [showReviewBanner, setShowReviewBanner] = useState(false);
+  const reviewCheckId = React.useRef(0);
   const tokenRef = React.useRef<string | null>(null);
   const dailySyncChecked = React.useRef(false);
 
@@ -207,6 +214,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setSyncStatus('idle');
     setUser(null);
     setToken(null);
+    setShowReviewBanner(false);
     await AsyncStorage.multiRemove(['@auth_token', '@auth_user']);
     await clearDepartedUserChatCache(departedUserId);
   };
@@ -396,9 +404,69 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const confirmProfileReview = async () => {
+    const raw = await AsyncStorage.getItem(PROFILE_REVIEW_KEY);
+    let store: Record<string, string> = {};
+    if (raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          store = Object.fromEntries(
+            Object.entries(parsed as Record<string, unknown>).filter(
+              (entry): entry is [string, string] => typeof entry[1] === 'string',
+            ),
+          );
+        }
+      } catch {
+        store = {};
+      }
+    }
+    if (!user) return;
+    store[String(user.id)] = new Date().toISOString();
+    await AsyncStorage.setItem(PROFILE_REVIEW_KEY, JSON.stringify(store));
+    reviewCheckId.current += 1;
+    setShowReviewBanner(false);
+  };
+
   useEffect(() => {
     if (isLoading || !user) return;
     maybeStartDailySync(user);
+  }, [isLoading, user]);
+
+  useEffect(() => {
+    if (isLoading || !user) {
+      if (!isLoading) setShowReviewBanner(false);
+      return;
+    }
+    const userId = user.id;
+    const checkId = ++reviewCheckId.current;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(PROFILE_REVIEW_KEY);
+        let stamp: string | null = null;
+        if (raw) {
+          try {
+            const parsed: unknown = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              const value = (parsed as Record<string, unknown>)[String(userId)];
+              if (typeof value === 'string') stamp = value;
+            }
+          } catch {
+            stamp = null;
+          }
+          if (!stamp && !Number.isNaN(Date.parse(raw))) stamp = raw;
+        }
+        const reviewedAt = stamp ? Date.parse(stamp) : NaN;
+        const due = !stamp || Number.isNaN(reviewedAt) || Date.now() - reviewedAt >= PROFILE_REVIEW_MS;
+        if (!cancelled && reviewCheckId.current === checkId) setShowReviewBanner(due);
+      } catch {
+        if (!cancelled && reviewCheckId.current === checkId) setShowReviewBanner(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isLoading, user]);
 
   const handleAutoSyncFinished = async () => {
@@ -435,6 +503,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         markLastSync,
         getStudentData,
         dismissSyncStatus,
+        showReviewBanner,
+        confirmProfileReview,
       }}
     >
       {children}

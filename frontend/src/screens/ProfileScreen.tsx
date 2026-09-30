@@ -485,6 +485,7 @@ const CreatePasswordModal = ({ visible, onClose, onSubmit }: CreatePasswordModal
 };
 
 const AuthenticatedProfile = () => {
+  const router = useRouter();
   const {
     user,
     logout,
@@ -495,6 +496,8 @@ const AuthenticatedProfile = () => {
     parseCabinet,
     setPassword,
     markLastSync,
+    showReviewBanner,
+    confirmProfileReview,
   } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -560,6 +563,14 @@ const AuthenticatedProfile = () => {
     setSuccessMessage('Пароль успешно изменён');
   };
 
+  const handleReviewStillValid = async () => {
+    try {
+      await confirmProfileReview();
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось сохранить отметку. Попробуйте ещё раз.');
+    }
+  };
+
   const handleNstuFinished = () => {
     setIsWebViewVisible(false);
     markLastSync().catch(() => {});
@@ -570,6 +581,33 @@ const AuthenticatedProfile = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.containerContent}>
+      {showReviewBanner && (
+        <View style={styles.reviewBanner}>
+          <View style={styles.reviewTitleRow}>
+            <Ionicons name="alert-circle" size={20} color="#FF9F0A" />
+            <Text style={styles.reviewTitle}>
+              Пора проверить актуальность данных в профиле! ИИ BYTE помнит старую информацию
+            </Text>
+          </View>
+          <View style={styles.reviewActions}>
+            <TouchableOpacity
+              style={styles.reviewCheck}
+              onPress={() => router.push('/profile/facts')}
+              accessibilityRole="button"
+            >
+              <Text style={styles.reviewCheckText}>Проверить</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.reviewOk}
+              onPress={handleReviewStillValid}
+              accessibilityRole="button"
+            >
+              <Text style={styles.reviewOkText}>Всё актуально</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {successMessage && (
         <View style={styles.successBanner}>
           <Ionicons name="checkmark-circle" size={18} color="#30D158" />
@@ -609,6 +647,15 @@ const AuthenticatedProfile = () => {
 
       {/* Menu */}
       <View style={styles.menu}>
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/profile/facts')}>
+          <Ionicons name="sparkles-outline" size={24} color="#fff" />
+          <View style={styles.menuTextCol}>
+            <Text style={styles.menuText}>Память ИИ</Text>
+            <Text style={styles.menuSubtext}>Факты, которые BYTE о вас хранит</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.menuItem}>
           <Ionicons name="person-outline" size={24} color="#fff" />
           <Text style={styles.menuText}>Редактировать профиль</Text>
@@ -889,6 +936,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   nstuBannerButtonText: { color: '#1C1C1E', fontSize: 14, fontWeight: '700' },
+  reviewBanner: {
+    backgroundColor: 'rgba(255, 159, 10, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 159, 10, 0.45)',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 16,
+    gap: 12,
+  },
+  reviewTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  reviewTitle: { flex: 1, color: '#FFD60A', fontSize: 15, fontWeight: '700', lineHeight: 21 },
+  reviewActions: { flexDirection: 'row', gap: 8 },
+  reviewCheck: {
+    flex: 1,
+    backgroundColor: '#FF9F0A',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  reviewCheckText: { color: '#1C1C1E', fontSize: 14, fontWeight: '700' },
+  reviewOk: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 214, 10, 0.55)',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  reviewOkText: { color: '#FFE08A', fontSize: 14, fontWeight: '700' },
 
   // ── Delete modal ──
   modalOverlay: {

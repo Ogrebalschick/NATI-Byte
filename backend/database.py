@@ -23,11 +23,12 @@ class User(Base):
     full_name = Column(String, nullable=True)
     student_group = Column(String, nullable=True)
     is_synced_with_nstu = Column(Boolean, default=False)
-    # cascade="all, delete-orphan" ensures chats / student data / subjects are deleted with the user
+    # cascade="all, delete-orphan" ensures related rows are deleted with the user
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
     student_data = relationship("StudentData", back_populates="user", cascade="all, delete-orphan")
     custom_subjects = relationship("CustomSubject", back_populates="user", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="user", cascade="all, delete-orphan")
+    facts = relationship("UserFact", back_populates="user", cascade="all, delete-orphan")
 
 
 class Chat(Base):
@@ -94,6 +95,23 @@ class Note(Base):
     user = relationship("User", back_populates="notes")
 
 
+class UserFact(Base):
+    """One piece of AI memory about the student. The owner can read and delete it."""
+    __tablename__ = "user_facts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    fact_text = Column(String, nullable=False)
+    source = Column(String, index=True, nullable=False)  # cabinet | chat | notes | grades
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    user = relationship("User", back_populates="facts")
+
+
 def _run_migrations() -> None:
     """Lightweight schema migration: create missing tables and add missing columns."""
     # create_all is idempotent and will add new tables without dropping existing data.
@@ -142,6 +160,20 @@ def _run_migrations() -> None:
                     conn.execute(text(ddl))
                     conn.commit()
                     print(f"[DB] Added missing column notes.{col_name}")
+
+        if "user_facts" in tables:
+            fact_cols = [c["name"] for c in inspector.get_columns("user_facts")]
+            fact_patches = {
+                "user_id": "ALTER TABLE user_facts ADD COLUMN user_id INTEGER",
+                "fact_text": "ALTER TABLE user_facts ADD COLUMN fact_text VARCHAR",
+                "source": "ALTER TABLE user_facts ADD COLUMN source VARCHAR",
+                "created_at": "ALTER TABLE user_facts ADD COLUMN created_at DATETIME",
+            }
+            for col_name, ddl in fact_patches.items():
+                if col_name not in fact_cols:
+                    conn.execute(text(ddl))
+                    conn.commit()
+                    print(f"[DB] Added missing column user_facts.{col_name}")
 
 
 # Create all tables (no-op if they already exist) then patch any missing columns

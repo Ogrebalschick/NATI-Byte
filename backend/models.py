@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime
 
 
@@ -140,6 +140,21 @@ class NoteResponse(BaseModel):
     category: str
     created_at: datetime
     updated_at: datetime
+
+
+# ── AI memory / digital footprint ─────────────────────────────────────────────
+
+class UserFactResponse(BaseModel):
+    id: int
+    user_id: int
+    fact_text: str
+    source: str
+    created_at: datetime
+
+
+class UserFactsGroupedResponse(BaseModel):
+    """All facts the app stores about the student, grouped by origin."""
+    groups: Dict[str, List[UserFactResponse]]
 
 
 # Kept for backward-compat (internal use)
