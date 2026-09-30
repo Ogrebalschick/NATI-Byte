@@ -3,18 +3,28 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 import bcrypt
 import jwt
+import random
+import smtplib
+import threading
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 
-from models import UserCreate, UserLogin, UserResponse, ChatSave
+from models import (
+    RegisterInit, VerifyRegister,
+    UserLogin, VerifyLogin,
+    UserResponse, ChatSave, Set2FARequest,
+)
 from database import get_db, User, Chat
 
 load_dotenv()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# SECRET_KEY must be set in .env — no insecure fallback
+# ── Security config ────────────────────────────────────────────────────────────
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY is not set in .env. Server cannot start without it.")
@@ -22,153 +32,334 @@ if not SECRET_KEY:
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
-# OAuth2 scheme: expects "Authorization: Bearer <token>" header
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
+# ── SMTP config ────────────────────────────────────────────────────────────────
 
-# --- Helpers ---
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "") or SMTP_USER
+
+# ── In-memory pending verification stores ─────────────────────────────────────
+# email → {"code": str, "expires_at": datetime, "name": str, "password_hash": str}
+_pending_reg: dict = {}
+# email → {"code": str, "expires_at": datetime, "user_id": int}
+_pending_login: dict = {}
+_store_lock = threading.Lock()
+
+CODE_TTL_MINUTES = 10
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt directly (avoids passlib/bcrypt version conflicts)."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plaintext password against a bcrypt hash."""
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    to_encode["exp"] = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def decode_token(token: str) -> dict:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise HTTPException(status_code=401, detail="Срок действия токена истёк")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Недействительный токен")
+
+def generate_code() -> str:
+    return str(random.randint(100000, 999999))
+
+def _user_to_dict(user: User) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "is_2fa_enabled": bool(user.is_2fa_enabled),
+    }
 
 
-# --- Auth endpoints ---
+def send_verification_email(to_email: str, code: str, purpose: str = "регистрации") -> None:
+    """
+    Send a 6-digit code to the student's email.
+    If SMTP credentials are not configured, prints the code to the server console
+    (development fallback — useful when running locally without mail server).
+    """
+    body = (
+        f"Ваш код подтверждения для {purpose} в BYTE:\n\n"
+        f"        {code}\n\n"
+        f"Код действителен {CODE_TTL_MINUTES} минут.\n"
+        f"Если вы не запрашивали этот код — проигнорируйте письмо."
+    )
 
-@router.post("/register", response_model=UserResponse)
-def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    # Only @stud.nstu.ru emails are allowed
-    if not user_data.email.endswith("@stud.nstu.ru"):
+    if not SMTP_USER or not SMTP_PASS:
+        # Dev mode: no SMTP configured — show code in server logs
+        print(f"\n{'='*50}")
+        print(f"[DEV] Код подтверждения для {to_email}: {code}")
+        print(f"{'='*50}\n")
+        return
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_email
+        msg["Subject"] = "Код подтверждения BYTE"
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_FROM, to_email, msg.as_string())
+    except Exception as exc:
+        print(f"[EMAIL ERROR] Не удалось отправить письмо на {to_email}: {exc}")
+        print(f"[DEV FALLBACK] Код для {to_email}: {code}")
+
+
+# ── Registration (two-step: init → verify) ────────────────────────────────────
+
+@router.post("/register/init")
+def register_init(data: RegisterInit, db: Session = Depends(get_db)):
+    """
+    Step 1: validate email domain, check uniqueness, hash password,
+    store pending record, and dispatch a 6-digit code to the student's inbox.
+    """
+    if not data.email.endswith("@stud.nstu.ru"):
         raise HTTPException(
             status_code=400,
-            detail="Only @stud.nstu.ru email addresses are allowed"
+            detail="Регистрация доступна только для почты @stud.nstu.ru",
         )
 
-    # Check if user already exists
-    existing = db.query(User).filter(User.email == user_data.email).first()
+    existing = db.query(User).filter(User.email == data.email).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Пользователь с такой почтой уже зарегистрирован")
+        raise HTTPException(
+            status_code=400,
+            detail="Пользователь с такой почтой уже зарегистрирован",
+        )
 
-    # Create new user with hashed password
-    hashed = get_password_hash(user_data.password)
+    code = generate_code()
+    password_hash = get_password_hash(data.password)
+    expires = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
+
+    with _store_lock:
+        _pending_reg[data.email] = {
+            "code": code,
+            "expires_at": expires,
+            "name": data.name,
+            "password_hash": password_hash,
+        }
+
+    send_verification_email(data.email, code, purpose="регистрации")
+    return {"status": "code_sent", "message": "Код подтверждения отправлен на вашу почту"}
+
+
+@router.post("/register/verify")
+def register_verify(data: VerifyRegister, db: Session = Depends(get_db)):
+    """
+    Step 2: verify the 6-digit code, create the user, and return a JWT (auto-login).
+    """
+    with _store_lock:
+        pending = _pending_reg.get(data.email)
+
+    if not pending:
+        raise HTTPException(
+            status_code=400,
+            detail="Сначала запросите код подтверждения",
+        )
+    if datetime.utcnow() > pending["expires_at"]:
+        with _store_lock:
+            _pending_reg.pop(data.email, None)
+        raise HTTPException(status_code=400, detail="Код истёк. Запросите новый.")
+    if pending["code"] != data.code.strip():
+        raise HTTPException(status_code=400, detail="Неверный код подтверждения")
+
+    # Create user in DB
     db_user = User(
-        email=user_data.email,
-        password_hash=hashed,
-        name=user_data.name
+        email=data.email,
+        password_hash=pending["password_hash"],
+        name=pending["name"],
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
 
-    return UserResponse(
-        id=db_user.id,
-        email=db_user.email,
-        name=db_user.name,
-        created_at=db_user.created_at
-    )
+    with _store_lock:
+        _pending_reg.pop(data.email, None)
+
+    token = create_access_token({"sub": db_user.email, "id": db_user.id})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _user_to_dict(db_user),
+    }
+
+
+# ── Login (with optional 2FA) ─────────────────────────────────────────────────
 
 @router.post("/login")
-def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_data.email).first()
-    if not user or not verify_password(user_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+def login(data: UserLogin, db: Session = Depends(get_db)):
+    """
+    Login endpoint.
+    - If 2FA is disabled: returns JWT immediately.
+    - If 2FA is enabled: dispatches a code and returns {"status": "requires_verification"}.
+    """
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user or not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Неверный email или пароль")
+
+    if user.is_2fa_enabled:
+        code = generate_code()
+        expires = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
+        with _store_lock:
+            _pending_login[data.email] = {
+                "code": code,
+                "expires_at": expires,
+                "user_id": user.id,
+            }
+        send_verification_email(data.email, code, purpose="входа в аккаунт")
+        return {"status": "requires_verification"}
 
     token = create_access_token({"sub": user.email, "id": user.id})
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name
-        }
+        "user": _user_to_dict(user),
     }
+
+
+@router.post("/login/verify")
+def login_verify(data: VerifyLogin, db: Session = Depends(get_db)):
+    """2FA step: verify code and return JWT."""
+    with _store_lock:
+        pending = _pending_login.get(data.email)
+
+    if not pending:
+        raise HTTPException(
+            status_code=400,
+            detail="Сначала выполните вход с вашим паролем",
+        )
+    if datetime.utcnow() > pending["expires_at"]:
+        with _store_lock:
+            _pending_login.pop(data.email, None)
+        raise HTTPException(status_code=400, detail="Код истёк. Попробуйте войти снова.")
+    if pending["code"] != data.code.strip():
+        raise HTTPException(status_code=400, detail="Неверный код подтверждения")
+
+    user = db.query(User).filter(User.id == pending["user_id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    with _store_lock:
+        _pending_login.pop(data.email, None)
+
+    token = create_access_token({"sub": user.email, "id": user.id})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _user_to_dict(user),
+    }
+
+
+# ── Authenticated endpoints ───────────────────────────────────────────────────
 
 @router.get("/me")
 def get_me(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Returns the current authenticated user. Requires Bearer token in Authorization header."""
     payload = decode_token(token)
     user = db.query(User).filter(User.id == payload["id"]).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return _user_to_dict(user) | {"created_at": user.created_at}
+
+
+@router.delete("/delete")
+def delete_account(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently delete the authenticated user and all their chats (cascaded).
+    """
+    payload = decode_token(token)
+    user = db.query(User).filter(User.id == payload["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted", "message": "Аккаунт успешно удалён"}
+
+
+@router.patch("/2fa")
+def set_2fa(
+    data: Set2FARequest,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Enable or disable two-factor authentication for the authenticated user."""
+    payload = decode_token(token)
+    user = db.query(User).filter(User.id == payload["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.is_2fa_enabled = data.enabled
+    db.commit()
     return {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "created_at": user.created_at
+        "status": "updated",
+        "is_2fa_enabled": data.enabled,
+        "message": f"Двухфакторная аутентификация {'включена' if data.enabled else 'отключена'}",
     }
+
 
 @router.post("/chats/save")
 def save_chat(
     data: ChatSave,
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Save or update a chat for the authenticated user. Requires Bearer token."""
     payload = decode_token(token)
     user = db.query(User).filter(User.id == payload["id"]).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-    # Update existing chat or create a new one
     chat = db.query(Chat).filter(Chat.id == data.id, Chat.user_id == user.id).first()
     if chat:
         chat.title = data.title
         chat.messages = data.messages
         chat.updated_at = datetime.utcnow()
     else:
-        chat = Chat(
-            id=data.id,
-            user_id=user.id,
-            title=data.title,
-            messages=data.messages
-        )
+        chat = Chat(id=data.id, user_id=user.id, title=data.title, messages=data.messages)
         db.add(chat)
 
     db.commit()
     return {"success": True}
 
+
 @router.get("/chats")
 def get_chats(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Returns all chats for the authenticated user. Requires Bearer token."""
     payload = decode_token(token)
     user = db.query(User).filter(User.id == payload["id"]).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-    chats = db.query(Chat).filter(Chat.user_id == user.id).all()
     return [
         {
-            "id": chat.id,
-            "title": chat.title,
-            "messages": chat.messages,
-            "created_at": chat.created_at,
-            "updated_at": chat.updated_at
+            "id": c.id,
+            "title": c.title,
+            "messages": c.messages,
+            "created_at": c.created_at,
+            "updated_at": c.updated_at,
         }
-        for chat in chats
+        for c in db.query(Chat).filter(Chat.user_id == user.id).all()
     ]
