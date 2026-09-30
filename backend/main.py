@@ -8,6 +8,7 @@ from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from auth import router as auth_router
+from parser import router as sync_router
 
 load_dotenv()
 app = FastAPI(title="Байт Бэкенд")
@@ -21,8 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Подключаем роуты аутентификации
+# Auth + NSTU cabinet sync
 app.include_router(auth_router)
+app.include_router(sync_router)
 
 chat = GigaChat(
     credentials=os.getenv("GIGACHAT_CREDENTIALS"),

@@ -65,6 +65,13 @@ class PasswordResetConfirm(BaseModel):
     new_password: str
 
 
+# ── NSTU cabinet sync ─────────────────────────────────────────────────────────
+
+class CabinetParseRequest(BaseModel):
+    page_type: str  # 'timetable' | 'profile'
+    raw_text: str
+
+
 # Kept for backward-compat (internal use)
 class UserCreate(BaseModel):
     email: EmailStr
