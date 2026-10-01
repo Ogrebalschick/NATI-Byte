@@ -167,7 +167,8 @@ def _task_to_response(task: Task) -> TaskResponse:
         title=task.title,
         description=task.description or "",
         due_date=task.due_date,
-        schedule_date=getattr(task, "schedule_date", None),  # safe for old DB rows
+        schedule_date=getattr(task, "schedule_date", None),
+        duration_minutes=getattr(task, "duration_minutes", 30) or 30,
         priority=task.priority,
         is_completed=task.is_completed,
         created_at=task.created_at,
@@ -347,6 +348,7 @@ def create_task(
             description=payload.description or "",
             due_date=payload.due_date,
             schedule_date=payload.schedule_date,
+            duration_minutes=payload.duration_minutes if payload.duration_minutes is not None else 30,
             priority=payload.priority,
             is_completed=False,
             created_at=now,
@@ -395,6 +397,8 @@ def update_task(
         task.due_date = payload.due_date
     if payload.schedule_date is not None:
         task.schedule_date = payload.schedule_date
+    if payload.duration_minutes is not None:
+        task.duration_minutes = payload.duration_minutes
     if payload.priority is not None:
         task.priority = payload.priority
     if payload.is_completed is not None:

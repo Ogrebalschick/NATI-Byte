@@ -173,8 +173,9 @@ class Task(Base):
 
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True, default="")
-    due_date = Column(DateTime, nullable=True)       # Дедлайн (крайний срок сдачи)
-    schedule_date = Column(DateTime, nullable=True)  # Дата выполнения (когда планируется делать)
+    due_date = Column(DateTime, nullable=True)        # Дедлайн (крайний срок сдачи)
+    schedule_date = Column(DateTime, nullable=True)   # Дата выполнения (когда планируется делать)
+    duration_minutes = Column(Integer, nullable=True, default=30)  # Длительность в минутах (для сетки календаря)
     priority = Column(Integer, nullable=False, default=4)  # 1 (highest) – 4 (lowest)
     is_completed = Column(Boolean, nullable=False, default=False)
 
@@ -267,14 +268,15 @@ def _run_migrations() -> None:
         if "tasks" in tables:
             task_cols = [c["name"] for c in inspector.get_columns("tasks")]
             task_patches = {
-                "description": "ALTER TABLE tasks ADD COLUMN description TEXT DEFAULT ''",
-                "due_date": "ALTER TABLE tasks ADD COLUMN due_date DATETIME",
-                "schedule_date": "ALTER TABLE tasks ADD COLUMN schedule_date DATETIME",
-                "priority": "ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 4",
-                "is_completed": "ALTER TABLE tasks ADD COLUMN is_completed BOOLEAN DEFAULT 0",
-                "project_id": "ALTER TABLE tasks ADD COLUMN project_id INTEGER",
-                "section_id": "ALTER TABLE tasks ADD COLUMN section_id INTEGER",
-                "updated_at": "ALTER TABLE tasks ADD COLUMN updated_at DATETIME",
+                "description":       "ALTER TABLE tasks ADD COLUMN description TEXT DEFAULT ''",
+                "due_date":          "ALTER TABLE tasks ADD COLUMN due_date DATETIME",
+                "schedule_date":     "ALTER TABLE tasks ADD COLUMN schedule_date DATETIME",
+                "duration_minutes":  "ALTER TABLE tasks ADD COLUMN duration_minutes INTEGER DEFAULT 30",
+                "priority":          "ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 4",
+                "is_completed":      "ALTER TABLE tasks ADD COLUMN is_completed BOOLEAN DEFAULT 0",
+                "project_id":        "ALTER TABLE tasks ADD COLUMN project_id INTEGER",
+                "section_id":        "ALTER TABLE tasks ADD COLUMN section_id INTEGER",
+                "updated_at":        "ALTER TABLE tasks ADD COLUMN updated_at DATETIME",
             }
             for col_name, ddl in task_patches.items():
                 if col_name not in task_cols:

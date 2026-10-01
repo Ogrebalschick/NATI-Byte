@@ -230,8 +230,10 @@ class TaskCreate(BaseModel):
       • str  — название нового проекта / раздела, который будет создан на лету;
       • None — задача попадает во Входящие (без проекта / без раздела).
 
-    due_date      — крайний срок сдачи (дедлайн).
-    schedule_date — дата и время, когда студент планирует выполнить задачу.
+    due_date         — крайний срок сдачи (дедлайн).
+    schedule_date    — дата и время, когда студент планирует выполнить задачу.
+    duration_minutes — длительность работы над задачей в минутах (используется
+                       для масштабирования карточки на почасовой сетке календаря).
     """
     title: str
     description: Optional[str] = ""
@@ -239,6 +241,7 @@ class TaskCreate(BaseModel):
     section_id: Optional[Union[int, str]] = None
     due_date: Optional[datetime] = None
     schedule_date: Optional[datetime] = None
+    duration_minutes: Optional[int] = Field(default=30, ge=1, le=1440)
     priority: int = Field(default=4, ge=1, le=4)
 
     @field_validator('project_id', 'section_id', mode='before')
@@ -274,6 +277,7 @@ class TaskUpdate(BaseModel):
     section_id: Optional[int] = None
     due_date: Optional[datetime] = None
     schedule_date: Optional[datetime] = None
+    duration_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
     priority: Optional[int] = Field(default=None, ge=1, le=4)
     is_completed: Optional[bool] = None
 
@@ -287,6 +291,7 @@ class TaskResponse(BaseModel):
     description: Optional[str] = ""
     due_date: Optional[datetime] = None
     schedule_date: Optional[datetime] = None
+    duration_minutes: Optional[int] = 30
     priority: int
     is_completed: bool
     created_at: datetime

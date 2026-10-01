@@ -447,6 +447,7 @@ Markdown-заметки студента с AI-категоризацией.
 | `description` | Text | nullable, default="" | Подробное описание |
 | `due_date` | DateTime | nullable | **Дедлайн** — крайний срок сдачи/выполнения задачи |
 | `schedule_date` | DateTime | nullable | **Дата выполнения** — когда студент планирует работать над задачей (может не совпадать с дедлайном) |
+| `duration_minutes` | Integer | nullable, default=30 | **Длительность** работы над задачей в минутах. Используется CalendarView для масштабирования карточки по высоте на почасовой сетке. Диапазон: 1–1440 (целые сутки). |
 | `priority` | Integer | NOT NULL, default=4 | Приоритет: 1 (наивысший) … 4 (нет приоритета) |
 | `is_completed` | Boolean | NOT NULL, default=False | Выполнена ли |
 | `created_at` | DateTime | NOT NULL, default=now | Дата создания |
@@ -694,25 +695,28 @@ class TaskCreate(BaseModel):
     # Принимают int (ID) ИЛИ str (имя для создания на лету) ИЛИ None
     project_id: Optional[Union[int, str]] = None
     section_id: Optional[Union[int, str]] = None
-    due_date: Optional[datetime] = None       # Дедлайн (крайний срок)
-    schedule_date: Optional[datetime] = None  # Дата выполнения (планируемая)
+    due_date: Optional[datetime] = None            # Дедлайн (крайний срок)
+    schedule_date: Optional[datetime] = None       # Дата выполнения (планируемая)
+    duration_minutes: Optional[int] = 30           # Длительность в минутах (1–1440)
     priority: int = Field(default=4, ge=1, le=4)
     # Валидатор: "5" → 5 (int), "Мат. анализ" → str, пустая строка → None
 
 class TaskUpdate(BaseModel):
     title: Optional[str]
     description: Optional[str]
-    project_id: Optional[int]        # только int для обновления
-    section_id: Optional[int]        # только int для обновления
+    project_id: Optional[int]          # только int для обновления
+    section_id: Optional[int]          # только int для обновления
     due_date: Optional[datetime]
     schedule_date: Optional[datetime]
-    priority: Optional[int]          # ge=1, le=4
+    duration_minutes: Optional[int]    # ge=1, le=1440
+    priority: Optional[int]            # ge=1, le=4
     is_completed: Optional[bool]
 
 class TaskResponse(BaseModel):
-    # ... все поля Task + schedule_date
+    # ... все поля Task
     due_date: Optional[datetime]
-    schedule_date: Optional[datetime]   # ← новое поле
+    schedule_date: Optional[datetime]
+    duration_minutes: Optional[int]    # default=30 для старых записей
 
 class TodosDataResponse(BaseModel):
     projects: List[ProjectWithDataResponse]  # Проекты с секциями и задачами
