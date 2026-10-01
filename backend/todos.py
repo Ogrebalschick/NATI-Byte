@@ -4,20 +4,24 @@ Task Manager router — Todoist-style to-do lists for students.
 All endpoints require a valid JWT (via get_current_user).
 
 Routes:
-    GET    /todos/data                 — full project/section/task tree
-    POST   /todos/projects             — create project
-    POST   /todos/sections             — create section inside a project
-    POST   /todos/tasks                — create task (project/section can be int ID or str name)
-    PUT    /todos/tasks/{task_id}      — partial update of a task
-    DELETE /todos/tasks/{task_id}      — delete a task
+    GET    /todos/data                       — full project/section/task tree
+                                               (first project is always the virtual "all_tasks")
+    POST   /todos/projects                   — create project
+    POST   /todos/sections                   — create section inside a project
+    PUT    /todos/sections/{section_id}      — rename section OR merge it into another section
+    POST   /todos/tasks                      — create task (project/section can be int ID or str name)
+    PUT    /todos/tasks/{task_id}            — partial update of a task
+    DELETE /todos/tasks/{task_id}            — delete a task
 
-New in this version:
-    • Task.schedule_date  — date+time when the student *plans* to work on the task
+Notes:
+    • Task.schedule_date — date+time when the student *plans* to work on the task
       (distinct from due_date which is the hard deadline).
-    • TaskCreate.project_id / section_id now accept:
-        – int  → existing entity ID (ownership is verified)
-        – str  → name of a new Project / Section to create on the fly
+    • TaskCreate.project_id / section_id accept:
+        – int  → existing entity ID (ownership verified)
+        – str  → name of a new Project / Section created on the fly in the same transaction
         – None → no project (inbox) / no section
+    • GET /todos/data always prepends a virtual project {id: "all_tasks", name: "Все задачи"}
+      whose inbox_tasks contains every active task the user owns across all projects.
 """
 
 from datetime import datetime
@@ -30,7 +34,7 @@ from auth import get_current_user
 from database import get_db, User, Project, Section, Task
 from models import (
     ProjectCreate, ProjectResponse,
-    SectionCreate, SectionResponse,
+    SectionCreate, SectionResponse, SectionUpdate,
     TaskCreate, TaskResponse, TaskUpdate,
     ProjectWithDataResponse, SectionWithTasksResponse,
     TodosDataResponse,
@@ -65,6 +69,19 @@ def _get_task_or_404(task_id: int, user_id: int, db: Session) -> Task:
             detail="Задача не найдена",
         )
     return task
+
+
+def _get_section_or_404(section_id: int, user_id: int, db: Session) -> Section:
+    """Return the section if it exists *and* its project belongs to user_id."""
+    section = db.query(Section).filter(Section.id == section_id).first()
+    if not section:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Раздел не найден",
+        )
+    # Ownership check via the section's project
+    _get_project_or_404(section.project_id, user_id, db)
+    return section
 
 
 # ── Smart project / section resolution ────────────────────────────────────────
@@ -253,9 +270,31 @@ def get_todos_data(
             )
         )
 
+    inbox_task_responses = [_task_to_response(t) for t in inbox_tasks]
+
+    # ── Виртуальный проект «Все задачи» ───────────────────────────────────────
+    # Агрегирует все активные задачи пользователя (из всех проектов + глобальный
+    # inbox) в одну плоскую коллекцию. Всегда первый элемент массива проектов.
+    # id="all_tasks" — строковой сентинел, не совпадает ни с одним реальным int-ID.
+    all_tasks_flat: List[TaskResponse] = list(inbox_task_responses)
+    for pn in project_nodes:
+        for section in pn.sections:
+            all_tasks_flat.extend(section.tasks)
+        all_tasks_flat.extend(pn.inbox_tasks)
+
+    virtual_all_tasks = ProjectWithDataResponse(
+        id="all_tasks",
+        user_id=current_user.id,
+        name="Все задачи",
+        color="#6366f1",
+        created_at=datetime.utcnow(),
+        sections=[],
+        inbox_tasks=all_tasks_flat,
+    )
+
     return TodosDataResponse(
-        projects=project_nodes,
-        inbox_tasks=[_task_to_response(t) for t in inbox_tasks],
+        projects=[virtual_all_tasks, *project_nodes],
+        inbox_tasks=inbox_task_responses,
     )
 
 
@@ -299,6 +338,91 @@ def create_section(
         position=payload.position,
     )
     db.add(section)
+    db.commit()
+    db.refresh(section)
+    return section
+
+
+# ── PUT /todos/sections/{section_id} ──────────────────────────────────────────
+
+@router.put("/sections/{section_id}", response_model=SectionResponse)
+def update_section(
+    section_id: int,
+    payload: SectionUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Переименовать раздел или слить его с другим разделом.
+
+    Сценарии
+    ─────────
+    1. Только name
+       → переименовать раздел; вернуть обновлённый объект.
+
+    2. Только merge_into_section_id
+       → переместить все задачи из текущего раздела в целевой (bulk UPDATE),
+         удалить исходный раздел; вернуть целевой раздел.
+
+    3. name + merge_into_section_id
+       → переместить задачи И переименовать целевой раздел; вернуть целевой.
+
+    Оба раздела (исходный и целевой) обязаны принадлежать текущему пользователю
+    (проверка через их project_id). Попытка слить раздел сам с собой → 400.
+
+    При межпроектном слиянии задачи также получают новый project_id (project_id
+    целевого раздела), чтобы оставаться в согласованном состоянии с БД.
+    """
+    # Проверяем исходный раздел и право владения
+    section = _get_section_or_404(section_id, current_user.id, db)
+
+    # ── Режим слияния ─────────────────────────────────────────────────────────
+    if payload.merge_into_section_id is not None:
+        if payload.merge_into_section_id == section_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Нельзя слить раздел сам с собой",
+            )
+
+        # Проверяем целевой раздел и право владения
+        target = _get_section_or_404(payload.merge_into_section_id, current_user.id, db)
+
+        # Переименовываем целевой раздел, если задано новое имя
+        if payload.name is not None:
+            new_name = payload.name.strip()
+            if not new_name:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Название раздела не должно быть пустым",
+                )
+            target.name = new_name
+
+        # Массовый перенос задач из исходного раздела в целевой.
+        # При межпроектном слиянии project_id задачи также обновляется.
+        db.query(Task).filter(Task.section_id == section_id).update(
+            {"section_id": target.id, "project_id": target.project_id},
+            synchronize_session=False,
+        )
+
+        # Удаляем теперь пустой исходный раздел
+        db.delete(section)
+        db.commit()
+        db.refresh(target)
+        return target
+
+    # ── Режим переименования ──────────────────────────────────────────────────
+    if payload.name is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Необходимо передать name или merge_into_section_id",
+        )
+    new_name = payload.name.strip()
+    if not new_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Название раздела не должно быть пустым",
+        )
+    section.name = new_name
     db.commit()
     db.refresh(section)
     return section

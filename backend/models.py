@@ -211,6 +211,22 @@ class SectionCreate(BaseModel):
     position: int = 0
 
 
+class SectionUpdate(BaseModel):
+    """
+    Переименование раздела или слияние его с другим разделом.
+
+    Сценарии
+    ─────────
+    • Только name                      → переименовать раздел.
+    • merge_into_section_id            → переместить все задачи в целевой раздел,
+                                         удалить исходный. Возвращается целевой раздел.
+    • name + merge_into_section_id     → переместить задачи И переименовать целевой раздел.
+    • Оба поля None                    → HTTP 400.
+    """
+    name: Optional[str] = None
+    merge_into_section_id: Optional[int] = None
+
+
 class SectionResponse(BaseModel):
     id: int
     project_id: int
@@ -315,7 +331,9 @@ class SectionWithTasksResponse(BaseModel):
 
 class ProjectWithDataResponse(BaseModel):
     """Project enriched with sections+tasks — the full tree node."""
-    id: int
+    # int  → настоящий проект из БД.
+    # str  → виртуальный проект (напр. "all_tasks" — агрегирует все задачи пользователя).
+    id: Union[int, str]
     user_id: int
     name: str
     color: str

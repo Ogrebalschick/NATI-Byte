@@ -745,12 +745,54 @@ Todoist-подобный таск-менеджер: Проекты → Секц�
 
 | Метод | URL | Схема запроса | Схема ответа | Описание |
 |-------|-----|--------------|--------------|----------|
-| `GET` 🔒 | `/todos/data` | — | `TodosDataResponse` | Полное дерево данных: проекты + секции + задачи + inbox (задачи без проекта). Один запрос для всего экрана |
+| `GET` 🔒 | `/todos/data` | — | `TodosDataResponse` | Полное дерево данных. **Первым элементом** массива `projects` всегда является виртуальный проект `{id: "all_tasks", name: "Все задачи"}`, агрегирующий все активные задачи пользователя. Далее — реальные проекты пользователя |
 | `POST` 🔒 | `/todos/projects` | `ProjectCreate` | `ProjectResponse` | Создать проект |
 | `POST` 🔒 | `/todos/sections` | `SectionCreate` | `SectionResponse` | Создать секцию внутри проекта (проект должен принадлежать текущему пользователю) |
+| `PUT` 🔒 | `/todos/sections/{section_id}` | `SectionUpdate` | `SectionResponse` | Переименовать раздел (`name`) или слить его с другим (`merge_into_section_id`). При слиянии все задачи перемещаются в целевой раздел bulk UPDATE, исходный удаляется. Возвращается итоговое состояние целевого раздела |
 | `POST` 🔒 | `/todos/tasks` | `TaskCreate` | `TaskResponse` | Создать задачу. `project_id`/`section_id` принимают **int** (ID) или **str** (имя — создаётся автоматически). Все сущности сохраняются в одной транзакции |
 | `PUT` 🔒 | `/todos/tasks/{task_id}` | `TaskUpdate` | `TaskResponse` | Частичное обновление задачи. Поддерживает смену `due_date`, `schedule_date`, перемещение между проектами/секциями |
 | `DELETE` 🔒 | `/todos/tasks/{task_id}` | — | 204 No Content | Удалить задачу |
+
+#### Виртуальный проект «Все задачи»
+
+```
+GET /todos/data → {
+  "projects": [
+    {
+      "id": "all_tasks",           // строковой сентинел (не int)
+      "name": "Все задачи",
+      "color": "#6366f1",
+      "sections": [],
+      "inbox_tasks": [             // ВСЕ активные задачи пользователя (flat)
+        { ...task из inbox },
+        { ...task из проекта A, секции 1 },
+        { ...task из проекта B },
+        ...
+      ]
+    },
+    { "id": 1, "name": "Проект А", ... },  // реальные проекты
+    ...
+  ],
+  "inbox_tasks": [...]  // глобальный inbox (задачи без проекта)
+}
+```
+
+#### Схема `SectionUpdate`
+
+```python
+class SectionUpdate(BaseModel):
+    name: Optional[str] = None                 # новое имя (для rename или rename целевого при merge)
+    merge_into_section_id: Optional[int] = None  # ID целевого раздела для слияния
+```
+
+**Логика `PUT /todos/sections/{section_id}`:**
+
+| `name` | `merge_into_section_id` | Результат |
+|--------|------------------------|-----------|
+| ✅ | ❌ | Переименовать исходный раздел |
+| ❌ | ✅ | Переместить задачи в целевой, удалить исходный |
+| ✅ | ✅ | Переместить задачи + переименовать целевой |
+| ❌ | ❌ | HTTP 400 |
 
 **Схемы:**
 ```python
@@ -849,9 +891,10 @@ class TodosDataResponse(BaseModel):
 | 34 | GET | `/todos/data` | 🔒 | todos |
 | 35 | POST | `/todos/projects` | 🔒 | todos |
 | 36 | POST | `/todos/sections` | 🔒 | todos |
-| 37 | POST | `/todos/tasks` | 🔒 | todos |
-| 38 | PUT | `/todos/tasks/{task_id}` | 🔒 | todos |
-| 39 | DELETE | `/todos/tasks/{task_id}` | 🔒 | todos |
+| 37 | PUT | `/todos/sections/{section_id}` | 🔒 | todos |
+| 38 | POST | `/todos/tasks` | 🔒 | todos |
+| 39 | PUT | `/todos/tasks/{task_id}` | 🔒 | todos |
+| 40 | DELETE | `/todos/tasks/{task_id}` | 🔒 | todos |
 
 ---
 
