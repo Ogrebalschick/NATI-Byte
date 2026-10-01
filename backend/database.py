@@ -32,6 +32,7 @@ class User(Base):
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="user", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
 
 
 class Chat(Base):
@@ -187,6 +188,44 @@ class Task(Base):
     section = relationship("Section", back_populates="tasks")
 
 
+# ── Notification system ───────────────────────────────────────────────────────
+
+# Valid category values (stored as plain strings for SQLite compat).
+NOTIFICATION_CATEGORIES = ("tasks", "reminders", "wishes")
+
+
+class Notification(Base):
+    """
+    In-app notification for a user.
+
+    Categories
+    ──────────
+    • tasks     — deadline / overdue reminders generated from Task data.
+    • reminders — study reminders set by the user or auto-scheduler.
+    • wishes    — motivational / greeting messages ("Доброго утра!").
+
+    Lifecycle: created by the backend (scheduled jobs or event hooks),
+    consumed by the client which marks them read individually or all-at-once.
+    """
+    __tablename__ = "notifications"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    title      = Column(String, nullable=False)
+    body       = Column(Text, nullable=False, default="")
+    # One of NOTIFICATION_CATEGORIES; kept as plain VARCHAR for SQLite flexibility.
+    category   = Column(String, nullable=False, default="tasks", index=True)
+    is_read    = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    user = relationship("User", back_populates="notifications")
+
+
 def _run_migrations() -> None:
     """Lightweight schema migration: create missing tables and add missing columns."""
     # create_all is idempotent and will add new tables without dropping existing data.
@@ -294,6 +333,19 @@ def _run_migrations() -> None:
                     conn.execute(text(ddl))
                     conn.commit()
                     print(f"[DB] Added missing column projects.{col_name}")
+
+        # ── Notification table ─────────────────────────────────────────────────
+        # The table is created by create_all above; patches guard future schema changes.
+        if "notifications" in tables:
+            notif_cols = [c["name"] for c in inspector.get_columns("notifications")]
+            notif_patches: dict[str, str] = {
+                # Room for future columns, e.g. action_url or expires_at.
+            }
+            for col_name, ddl in notif_patches.items():
+                if col_name not in notif_cols:
+                    conn.execute(text(ddl))
+                    conn.commit()
+                    print(f"[DB] Added missing column notifications.{col_name}")
 
 
 # Create all tables (no-op if they already exist) then patch any missing columns

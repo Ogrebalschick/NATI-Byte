@@ -349,3 +349,55 @@ class TodosDataResponse(BaseModel):
     """Full task-manager snapshot for the authenticated user."""
     projects: List[ProjectWithDataResponse] = []
     inbox_tasks: List[TaskResponse] = []  # tasks with no project at all
+
+
+# ── Notification system ────────────────────────────────────────────────────────
+
+# Allowed values for Notification.category
+VALID_NOTIFICATION_CATEGORIES = {"tasks", "reminders", "wishes"}
+
+
+class NotificationCreate(BaseModel):
+    """
+    Payload used by backend services (scheduled jobs, event hooks) to push a
+    notification into a user's feed.
+
+    `category` must be one of: "tasks" | "reminders" | "wishes".
+    """
+    title: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(default="", max_length=2000)
+    category: str = Field(default="tasks")
+
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in VALID_NOTIFICATION_CATEGORIES:
+            raise ValueError(
+                f"category must be one of {sorted(VALID_NOTIFICATION_CATEGORIES)}, got '{v}'"
+            )
+        return v
+
+
+class NotificationUpdate(BaseModel):
+    """Used by PATCH /notifications/{id}/read to flip the is_read flag."""
+    is_read: bool = True
+
+
+class NotificationResponse(BaseModel):
+    """Full notification object returned by all notification endpoints."""
+    id: int
+    user_id: int
+    title: str
+    body: str
+    category: str
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UnreadCountResponse(BaseModel):
+    """Lightweight response for the notification bell badge."""
+    count: int

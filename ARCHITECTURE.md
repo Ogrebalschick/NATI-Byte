@@ -534,6 +534,32 @@ Markdown-заметки студента с AI-категоризацией.
 
 ---
 
+### Таблица `notifications`
+
+Уведомления в ленте пользователя. Создаются бэкенд-сервисами (планировщик дедлайнов, ежедневные пожелания), читаются мобильным клиентом.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `user_id` | Integer | FK → users.id (ondelete=CASCADE), NOT NULL, index | Владелец |
+| `title` | String | NOT NULL, max 200 | Заголовок уведомления (пр.: «Дедлайн по физике!») |
+| `body` | Text | NOT NULL, default="" | Тело уведомления (пр.: «Через 30 минут истекает срок сдачи РГЗ») |
+| `category` | String | NOT NULL, default="tasks", index | Категория: `tasks` \| `reminders` \| `wishes` |
+| `is_read` | Boolean | NOT NULL, default=False | Прочитано ли пользователем |
+| `created_at` | DateTime | NOT NULL, default=now, index | Дата создания (используется для сортировки: новейшие первые) |
+
+**Категории:**
+
+| Значение | Описание |
+|----------|----------|
+| `tasks` | Напоминания о дедлайнах и просроченных задачах |
+| `reminders` | Напоминания учёбы, настроенные пользователем или планировщиком |
+| `wishes` | Мотивационные и приветственные сообщения («Доброго утра, Илья!») |
+
+**Связи:** `user` → `User` (cascade=all, delete-orphan — удаляются вместе с пользователем)
+
+---
+
 ## 3. Карта API и эндпоинтов
 
 **Бэкенд:** FastAPI (Python), порт `8000`
@@ -851,6 +877,52 @@ class TodosDataResponse(BaseModel):
 
 ---
 
+### 3.7 Notifications (`/notifications`) — `backend/notifications.py`
+
+Лента in-app уведомлений. Уведомления создаются бэкенд-сервисами (планировщик дедлайнов, генератор пожеланий) и читаются мобильным клиентом. Все эндпоинты защищены JWT.
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `GET` 🔒 | `/notifications` | — | `List[NotificationResponse]` | Все уведомления текущего пользователя, отсортированные по `created_at DESC` (новейшие первые). Включает прочитанные и непрочитанные |
+| `GET` 🔒 | `/notifications/unread-count` | — | `UnreadCountResponse` | Количество непрочитанных уведомлений для бейджа колокольчика. Быстрый запрос без загрузки тел |
+| `PATCH` 🔒 | `/notifications/{id}/read` | `NotificationUpdate` | `NotificationResponse` | Отметить одно уведомление прочитанным (или снять отметку, если `is_read=False`). 404 если не найдено или принадлежит другому пользователю |
+| `POST` 🔒 | `/notifications/read-all` | — | `{status, marked: int}` | Bulk UPDATE: отметить все непрочитанные уведомления текущего пользователя как прочитанные за один SQL-запрос. Возвращает количество затронутых строк |
+| `POST` 🔒 | `/notifications` | `NotificationCreate` | `NotificationResponse` | Создать уведомление для текущего пользователя. **Основные вызывающие:** фоновые задачи и планировщики (дедлайны, пожелания). В продакшене может быть ограничен до сервисного токена |
+
+**Схемы:**
+
+```python
+class NotificationCreate(BaseModel):
+    title:    str   # 1–200 символов, заголовок
+    body:     str   # 0–2000 символов, тело уведомления
+    category: str   # "tasks" | "reminders" | "wishes"  (валидируется)
+
+class NotificationUpdate(BaseModel):
+    is_read: bool = True   # по умолчанию True (отметить прочитанным)
+
+class NotificationResponse(BaseModel):
+    id:         int
+    user_id:    int
+    title:      str
+    body:       str
+    category:   str
+    is_read:    bool
+    created_at: datetime
+
+class UnreadCountResponse(BaseModel):
+    count: int   # количество непрочитанных
+```
+
+**Категории:**
+
+| `category` | Назначение |
+|------------|------------|
+| `tasks` | Просроченные дедлайны, предстоящие дедлайны (сгенерированы из таблицы tasks) |
+| `reminders` | Напоминания учёбы от планировщика или самого пользователя |
+| `wishes` | Мотивационные пожелания: «Доброго утра, Илья!», «Ты справишься!» |
+
+---
+
 ### Итоговая таблица всех эндпоинтов
 
 | # | Метод | Путь | Auth | Роутер |
@@ -895,6 +967,11 @@ class TodosDataResponse(BaseModel):
 | 38 | POST | `/todos/tasks` | 🔒 | todos |
 | 39 | PUT | `/todos/tasks/{task_id}` | 🔒 | todos |
 | 40 | DELETE | `/todos/tasks/{task_id}` | 🔒 | todos |
+| 41 | GET | `/notifications` | 🔒 | notifications |
+| 42 | GET | `/notifications/unread-count` | 🔒 | notifications |
+| 43 | PATCH | `/notifications/{id}/read` | 🔒 | notifications |
+| 44 | POST | `/notifications/read-all` | 🔒 | notifications |
+| 45 | POST | `/notifications` | 🔒 | notifications |
 
 ---
 
@@ -921,15 +998,16 @@ class TodosDataResponse(BaseModel):
 
 ```
 backend/
-├── main.py        # FastAPI app, CORS, подключение роутеров, /ask эндпоинт
-├── database.py    # SQLAlchemy модели + миграции (_run_migrations)
-├── models.py      # Все Pydantic-схемы запросов и ответов
-├── auth.py        # Роутер /auth: login, register, sessions, 2FA, password
-├── parser.py      # Роутер /sync: парсинг ЛК НГТУ через GigaChat
-├── subjects.py    # Роутер /subjects: ручные предметы и баллы
-├── notes.py       # Роутер /notes: markdown заметки
-├── facts.py       # Роутер /profile: AI-память студента (UserFacts)
-└── todos.py       # Роутер /todos: таск-менеджер (Project/Section/Task)
+├── main.py             # FastAPI app, CORS, подключение роутеров, /ask эндпоинт
+├── database.py         # SQLAlchemy модели + миграции (_run_migrations)
+├── models.py           # Все Pydantic-схемы запросов и ответов
+├── auth.py             # Роутер /auth: login, register, sessions, 2FA, password
+├── parser.py           # Роутер /sync: парсинг ЛК НГТУ через GigaChat
+├── subjects.py         # Роутер /subjects: ручные предметы и баллы
+├── notes.py            # Роутер /notes: markdown заметки
+├── facts.py            # Роутер /profile: AI-память студента (UserFacts)
+├── todos.py            # Роутер /todos: таск-менеджер (Project/Section/Task)
+└── notifications.py    # Роутер /notifications: in-app уведомления (лента, бейдж, read-all)
 ```
 
 ### Правило №4 — Структура фронтенда
