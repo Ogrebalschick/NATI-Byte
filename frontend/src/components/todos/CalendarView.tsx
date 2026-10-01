@@ -46,9 +46,15 @@ const END_HOUR   = HOURS[HOURS.length - 1]!; // 22
  * 1 час = 60 px → 1 минута = 1 px.
  * При duration_minutes = 60 карточка займёт ровно 60 px высоты.
  */
-const HOUR_HEIGHT = 60; // px per hour
-const PX_PER_MIN  = HOUR_HEIGHT / 60; // = 1
-const MIN_CARD_H  = 28; // минимальная высота карточки (два ряда текста)
+const HOUR_HEIGHT = 60; // px per hour  →  1 час = 60 px
+const PX_PER_MIN  = HOUR_HEIGHT / 60; // = 1  →  1 минута = 1 px
+/**
+ * Пороги адаптивного контента карточки.
+ * MIN_CARD_H — нижняя граница высоты (15 мин → 20 px, не меньше).
+ */
+const MIN_CARD_H  = 20; // px — минимальная высота слота (скруглённая таблетка)
+const COMPACT_H   = 45; // px — ниже этой границы: компактный однострочный макет
+const MEDIUM_H    = 75; // px — ниже этой границы: средний макет без project-info
 const TIME_COL_W  = 52; // ширина колонки времени
 const DAY_CELL_W  = 46; // ФИКСИРОВАННАЯ ширина ячейки в ленте дат
 const DAY_CELL_H  = 58; // ФИКСИРОВАННАЯ высота ячейки в ленте дат
@@ -131,22 +137,30 @@ function buildEventsForDay(
 }
 
 /**
- * Offset (px) from the top of the grid for a given time.
- * Grid starts at START_HOUR; 1 hour = HOUR_HEIGHT px.
+ * Смещение (px) от верха сетки для заданного времени.
+ * Начало сетки = START_HOUR. 1 час = HOUR_HEIGHT px, 1 мин = PX_PER_MIN px.
+ *
+ * Гарантирует Number-cast, чтобы строки вида "14" не сломали математику.
  */
 function timeToY(date: Date): number {
-  const h = Math.max(START_HOUR, Math.min(END_HOUR, date.getHours()));
-  return (h - START_HOUR) * HOUR_HEIGHT + date.getMinutes() * PX_PER_MIN;
+  const h = Math.max(START_HOUR, Math.min(END_HOUR, Number(date.getHours())));
+  const m = Math.max(0, Math.min(59, Number(date.getMinutes())));
+  return (h - START_HOUR) * HOUR_HEIGHT + m * PX_PER_MIN;
 }
 
 /**
- * Card height in px.
- * 1 minute = PX_PER_MIN px (= 1 by default).
- * Minimum = MIN_CARD_H px so that even 1-minute tasks are readable.
+ * Высота карточки (px) строго пропорционально длительности без верхних ограничений.
+ *   cardHeight = duration_minutes * PX_PER_MIN
+ *   (1 мин = 1 px, 30 мин = 30 px, 90 мин = 90 px, ...)
+ *
+ * Number() cast гарантирует корректность, если backend вернул строку "90".
+ * Нижний предел MIN_CARD_H (20 px) — минимум для читаемости 15-минутной задачи.
+ * Верхнего предела НЕТ: задача на 120 мин занимает ровно 120 px.
  */
-function durationToH(minutes: number | null | undefined): number {
-  const mins = minutes ?? 30;
-  return Math.max(MIN_CARD_H, mins * PX_PER_MIN);
+function durationToH(rawMinutes: number | string | null | undefined): number {
+  const mins = Number(rawMinutes ?? 30);
+  const safe  = isNaN(mins) || mins <= 0 ? 30 : mins;
+  return Math.max(MIN_CARD_H, safe * PX_PER_MIN);
 }
 
 // ── ModeSegments ──────────────────────────────────────────────────────────────
@@ -276,7 +290,144 @@ const stripStyles = StyleSheet.create({
   textSelected: { color: '#fff' },
 });
 
-// ── EventCard (кликабельная карточка события) ─────────────────────────────────
+// ── DayEventCard — адаптивная карточка для почасовой сетки (режим «День») ─────
+//
+// Макет зависит от высоты слота (= duration_minutes * PX_PER_MIN):
+//
+//  < MIN_CARD_H (20 px) — невозможно, MIN_CARD_H гарантирует минимум
+//  20 – COMPACT_H (45 px) — «micro»: одна строка, иконка + время + название
+//  45 – MEDIUM_H  (75 px) — «compact»: badge в строке с временем, название ниже
+//  ≥ 75 px               — «full»: badge + время + название + проект
+
+function DayEventCard({
+  event,
+  slotHeight,
+  onPress,
+}: {
+  event: CalendarEvent;
+  slotHeight: number; // вычисленная высота слота в px
+  onPress?: (task: TodoTask) => void;
+}) {
+  const isDeadline = event.type === 'deadline';
+  const accent     = isDeadline ? DEADLINE_COLOR : SCHEDULE_COLOR;
+  const icon       = isDeadline ? '🚨' : '🛠️';
+
+  // ── Micro: < COMPACT_H (< ~45 мин) ──────────────────────────────────────
+  if (slotHeight < COMPACT_H) {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => onPress?.(event.task)}
+        style={[dc.micro, { borderLeftColor: accent }]}
+      >
+        <Text style={[dc.microLabel, { color: accent }]} numberOfLines={1}>
+          {icon} {fmtTime(event.date)}{'  '}
+          <Text style={dc.microTitle}>{event.task.title}</Text>
+        </Text>
+      </TouchableOpacity>
+    );
+  }
+
+  // ── Compact: 45–75 px (~45–75 мин) ──────────────────────────────────────
+  if (slotHeight < MEDIUM_H) {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => onPress?.(event.task)}
+        style={[dc.compact, { borderLeftColor: accent }]}
+      >
+        {/* Row 1: badge + time */}
+        <View style={dc.compactHeader}>
+          <View style={[dc.badge, { backgroundColor: `${accent}22` }]}>
+            <Text style={[dc.badgeText, { color: accent }]}>
+              {icon} {fmtTime(event.date)}
+            </Text>
+          </View>
+        </View>
+        {/* Row 2: title */}
+        <Text style={dc.compactTitle} numberOfLines={1}>{event.task.title}</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  // ── Full: ≥ 75 px (~75+ мин) ─────────────────────────────────────────────
+  return (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={() => onPress?.(event.task)}
+      style={[dc.full, { borderLeftColor: accent }]}
+    >
+      <View style={dc.fullHeader}>
+        <View style={[dc.badge, { backgroundColor: `${accent}22` }]}>
+          <Text style={[dc.badgeText, { color: accent }]}>
+            {isDeadline ? '🚨 Дедлайн' : '🛠️ Выполнить'}
+          </Text>
+        </View>
+        <Text style={dc.fullTime}>{fmtTime(event.date)}</Text>
+      </View>
+      <Text style={dc.fullTitle} numberOfLines={3}>{event.task.title}</Text>
+      {event.projectName ? (
+        <View style={dc.fullMeta}>
+          <View style={[dc.dot, { backgroundColor: event.projectColor ?? '#6366f1' }]} />
+          <Text style={dc.projName} numberOfLines={1}>{event.projectName}</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+
+const dc = StyleSheet.create({
+  // ── Micro (< 45 px) ─────────────────────────────────────────────────────
+  micro: {
+    flex: 1,
+    backgroundColor: CARD2,
+    borderLeftWidth: 3,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  microLabel: { fontSize: 10, fontWeight: '700', lineHeight: 13 },
+  microTitle: { fontSize: 10, fontWeight: '400', color: TEXT },
+
+  // ── Compact (45–75 px) ───────────────────────────────────────────────────
+  compact: {
+    flex: 1,
+    backgroundColor: CARD2,
+    borderLeftWidth: 3,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    gap: 3,
+    overflow: 'hidden',
+  },
+  compactHeader: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  compactTitle:  { fontSize: 11, fontWeight: '500', color: TEXT, lineHeight: 15 },
+
+  // ── Full (≥ 75 px) ───────────────────────────────────────────────────────
+  full: {
+    flex: 1,
+    backgroundColor: CARD2,
+    borderLeftWidth: 3,
+    borderRadius: 10,
+    padding: 9,
+    gap: 4,
+    overflow: 'hidden',
+  },
+  fullHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  fullTime:   { fontSize: 11, color: TEXT2, fontWeight: '600', marginLeft: 'auto' },
+  fullTitle:  { fontSize: 13, fontWeight: '500', color: TEXT, lineHeight: 18 },
+  fullMeta:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
+
+  // ── Shared ───────────────────────────────────────────────────────────────
+  badge:     { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeText: { fontSize: 10, fontWeight: '700' },
+  dot:       { width: 6, height: 6, borderRadius: 3 },
+  projName:  { fontSize: 11, color: MUTED },
+});
+
+// ── EventCard — карточка для Недели и Месяца ──────────────────────────────────
 
 function EventCard({
   event,
@@ -329,7 +480,6 @@ function EventCard({
 }
 
 const evStyles = StyleSheet.create({
-  // Full card (Day + Month list)
   card: {
     backgroundColor: CARD2, borderRadius: 10, borderLeftWidth: 3,
     padding: 9, gap: 4, overflow: 'hidden',
@@ -343,7 +493,6 @@ const evStyles = StyleSheet.create({
   dot: { width: 6, height: 6, borderRadius: 3 },
   projName: { fontSize: 11, color: MUTED },
 
-  // Compact card (Week + Month grid cells)
   compact: {
     backgroundColor: CARD2, borderRadius: 6, borderLeftWidth: 3,
     paddingHorizontal: 6, paddingVertical: 5, gap: 2, overflow: 'hidden',
@@ -353,9 +502,17 @@ const evStyles = StyleSheet.create({
 });
 
 // ── DayView ───────────────────────────────────────────────────────────────────
-// Фикс: двухколоночный layout — время слева, карточки справа.
-// Карточки абсолютно позиционированы ВНУТРИ правой колонки (position: relative),
-// поэтому занимают всю её ширину и не «улетают» вправо.
+//
+// Двухколоночный layout:
+//   • Левая колонка (TIME_COL_W) — абсолютные метки времени.
+//   • Правая колонка (flex: 1)   — position: relative, содержит:
+//       - горизонтальные линии часов (position: absolute)
+//       - карточки событий (position: absolute, top/height рассчитаны точно)
+//
+// Высота карточки = duration_minutes * PX_PER_MIN (без верхнего предела).
+// Карточки у нижней границы сетки не обрезаются: к TOTAL_H добавлен буфер.
+
+const GRID_BUFFER = HOUR_HEIGHT * 2; // 120 px запаса снизу для длинных событий у 22:00
 
 function DayView({
   events,
@@ -366,7 +523,9 @@ function DayView({
   tabBarHeight: number;
   onTaskPress?: (task: TodoTask) => void;
 }) {
-  const TOTAL_H = HOURS.length * HOUR_HEIGHT;
+  // Высота сетки + буфер, чтобы события у 22:00 с большой длительностью
+  // не обрезались границей контейнера.
+  const TOTAL_H = HOURS.length * HOUR_HEIGHT + GRID_BUFFER;
 
   if (events.length === 0) {
     return (
@@ -385,14 +544,9 @@ function DayView({
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingBottom: tabBarHeight + 80 }}
     >
-      {/*
-       * Двухколоночный контейнер с явной высотой.
-       * Левая колонка — фиксированная (TIME_COL_W), правая — flex: 1.
-       * Оба столбца имеют одинаковую высоту = TOTAL_H.
-       */}
       <View style={[dayStyles.grid, { height: TOTAL_H }]}>
 
-        {/* ── Левая колонка: метки времени ── */}
+        {/* ── Левая колонка: абсолютные метки времени ── */}
         <View style={dayStyles.timeCol}>
           {HOURS.map((hour, idx) => (
             <View key={hour} style={[dayStyles.timeRow, { top: idx * HOUR_HEIGHT }]}>
@@ -402,12 +556,11 @@ function DayView({
         </View>
 
         {/*
-         * ── Правая колонка: горизонтальные линии + карточки событий ──
+         * ── Правая колонка: сетка + события ──
          *
-         * position: 'relative' (default) + явная высота = TOTAL_H.
-         * Все дочерние элементы position: 'absolute' корректно
-         * позиционируются внутри этой колонки, занимая её полную ширину
-         * (left: 4, right: 4 → без выхода за границы).
+         * Явная высота TOTAL_H + overflow: 'visible' гарантируют,
+         * что длинные события (> 60 мин у конца сетки) не обрезаются.
+         * Сами карточки обрезают внутренний контент через overflow: 'hidden'.
          */}
         <View style={[dayStyles.eventsCol, { height: TOTAL_H }]}>
 
@@ -419,16 +572,21 @@ function DayView({
             />
           ))}
 
-          {/* Карточки событий, позиционированные по времени */}
+          {/* Карточки событий — позиция и высота строго пропорциональны времени */}
           {events.map((ev, i) => {
-            const top    = timeToY(ev.date);
-            const height = durationToH(ev.task.duration_minutes);
+            const top        = timeToY(ev.date);
+            const slotHeight = durationToH(ev.task.duration_minutes);
             return (
               <View
                 key={`${ev.task.id}_${ev.type}_${i}`}
-                style={[dayStyles.eventSlot, { top, height }]}
+                style={[dayStyles.eventSlot, { top, height: slotHeight }]}
               >
-                <EventCard event={ev} onPress={onTaskPress} />
+                {/* Адаптивный контент карточки зависит от высоты слота */}
+                <DayEventCard
+                  event={ev}
+                  slotHeight={slotHeight}
+                  onPress={onTaskPress}
+                />
               </View>
             );
           })}
@@ -448,51 +606,34 @@ const dayStyles = StyleSheet.create({
   },
 
   // Двухколоночный контейнер
-  grid: {
-    flexDirection: 'row',
-    // height задаётся inline = TOTAL_H
-  },
+  grid: { flexDirection: 'row' },
 
-  // Левая колонка: метки времени
-  timeCol: {
-    width: TIME_COL_W,
-    // Дочерние View абсолютно позиционированы
-  },
+  // Левая колонка
+  timeCol: { width: TIME_COL_W },
   timeRow: {
-    position:   'absolute',
-    left:       0,
-    width:      TIME_COL_W,
-    height:     HOUR_HEIGHT,
-    paddingTop: 4,
-    paddingLeft: 10,
+    position: 'absolute', left: 0, width: TIME_COL_W, height: HOUR_HEIGHT,
+    paddingTop: 4, paddingLeft: 10,
   },
-  timeLabel: {
-    fontSize: 11, color: MUTED, fontWeight: '500',
-  },
+  timeLabel: { fontSize: 11, color: MUTED, fontWeight: '500' },
 
-  // Правая колонка: сетка + события
+  // Правая колонка
   eventsCol: {
     flex: 1,
-    // position: 'relative' — по умолчанию для View; дочерние absolute-элементы
-    // позиционируются относительно этого контейнера
     borderLeftWidth: StyleSheet.hairlineWidth,
     borderLeftColor: BORDER,
-    paddingRight: 12,
+    // overflow: 'visible' (default) — НЕ обрезаем карточки снизу
   },
   hourLine: {
-    position:        'absolute',
-    left:            0,
-    right:           0,
-    height:          StyleSheet.hairlineWidth,
-    backgroundColor: BORDER,
+    position: 'absolute', left: 0, right: 0,
+    height: StyleSheet.hairlineWidth, backgroundColor: BORDER,
   },
   eventSlot: {
-    // Занимает всю ширину правой колонки (за вычетом paddingRight колонки)
     position: 'absolute',
     left:     4,
-    right:    0,
+    right:    8,
     // top + height задаются inline
-    overflow: 'hidden',
+    // overflow: 'visible' — слот не обрезает карточку
+    // Внутренняя карточка (DayEventCard) сама управляет overflow: 'hidden'
   },
 });
 
