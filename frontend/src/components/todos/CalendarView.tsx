@@ -11,7 +11,7 @@
  *
  * Лента DayStrip (28 дней) отображается ТОЛЬКО в режиме «День».
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   ScrollView,
@@ -38,9 +38,9 @@ const DEADLINE_COLOR = '#FF453A';
 
 // ── Calendar constants ────────────────────────────────────────────────────────
 
-const HOURS      = Array.from({ length: 16 }, (_, i) => i + 7); // 07–22
-const START_HOUR = HOURS[0]!;  // 7
-const END_HOUR   = HOURS[HOURS.length - 1]!; // 22
+const HOURS      = Array.from({ length: 24 }, (_, i) => i);     // 00–23
+const START_HOUR = HOURS[0]!;                                    // 0
+const END_HOUR   = HOURS[HOURS.length - 1]!;                     // 23
 
 /**
  * 1 час = 60 px → 1 минута = 1 px.
@@ -512,7 +512,22 @@ const evStyles = StyleSheet.create({
 // Высота карточки = duration_minutes * PX_PER_MIN (без верхнего предела).
 // Карточки у нижней границы сетки не обрезаются: к TOTAL_H добавлен буфер.
 
-const GRID_BUFFER = HOUR_HEIGHT * 2; // 120 px запаса снизу для длинных событий у 22:00
+/**
+ * Час для авто-скролла при открытии (08:00).
+ * Скрывает пустые ночные часы 00–07, но оставляет доступными при прокрутке вверх.
+ */
+const AUTO_SCROLL_HOUR = 8;
+/** Запас снизу: задача у 23:00 с длительностью > 60 мин не обрезается. */
+const GRID_BUFFER = HOUR_HEIGHT * 2;
+
+// ── DayView ───────────────────────────────────────────────────────────────────
+//
+// 24-часовая двухколоночная сетка:
+//   • Левая колонка (TIME_COL_W) — метки времени 00:00–23:00.
+//   • Правая колонка (flex: 1)   — горизонтальные линии + абсолютные карточки.
+//
+// Авто-скролл к 08:00 при монтировании: пользователь видит рабочие часы,
+// но может прокрутить вверх к ночным (00–07).
 
 function DayView({
   events,
@@ -523,30 +538,27 @@ function DayView({
   tabBarHeight: number;
   onTaskPress?: (task: TodoTask) => void;
 }) {
-  // Высота сетки + буфер, чтобы события у 22:00 с большой длительностью
-  // не обрезались границей контейнера.
-  const TOTAL_H = HOURS.length * HOUR_HEIGHT + GRID_BUFFER;
+  const TOTAL_H  = HOURS.length * HOUR_HEIGHT + GRID_BUFFER;
+  const scrollRef = useRef<ScrollView>(null);
 
-  if (events.length === 0) {
-    return (
-      <View style={dayStyles.empty}>
-        <Ionicons name="calendar-outline" size={54} color={MUTED} />
-        <Text style={dayStyles.emptyTitle}>Нет событий</Text>
-        <Text style={dayStyles.emptySub}>
-          Создай задачу с дедлайном или датой выполнения
-        </Text>
-      </View>
+  // Авто-скролл к 08:00 после рендера
+  useEffect(() => {
+    const t = setTimeout(
+      () => scrollRef.current?.scrollTo({ y: AUTO_SCROLL_HOUR * HOUR_HEIGHT, animated: false }),
+      80,
     );
-  }
+    return () => clearTimeout(t);
+  }, []);
 
   return (
     <ScrollView
+      ref={scrollRef}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingBottom: tabBarHeight + 80 }}
     >
       <View style={[dayStyles.grid, { height: TOTAL_H }]}>
 
-        {/* ── Левая колонка: абсолютные метки времени ── */}
+        {/* ── Левая колонка: метки времени 00:00–23:00 ── */}
         <View style={dayStyles.timeCol}>
           {HOURS.map((hour, idx) => (
             <View key={hour} style={[dayStyles.timeRow, { top: idx * HOUR_HEIGHT }]}>
@@ -555,24 +567,23 @@ function DayView({
           ))}
         </View>
 
-        {/*
-         * ── Правая колонка: сетка + события ──
-         *
-         * Явная высота TOTAL_H + overflow: 'visible' гарантируют,
-         * что длинные события (> 60 мин у конца сетки) не обрезаются.
-         * Сами карточки обрезают внутренний контент через overflow: 'hidden'.
-         */}
+        {/* ── Правая колонка: сетка + события ── */}
         <View style={[dayStyles.eventsCol, { height: TOTAL_H }]}>
 
-          {/* Горизонтальные разделители часов */}
+          {/* Горизонтальные линии часов (полупрозрачные) */}
           {HOURS.map((hour, idx) => (
-            <View
-              key={`line_${hour}`}
-              style={[dayStyles.hourLine, { top: idx * HOUR_HEIGHT }]}
-            />
+            <View key={`line_${hour}`} style={[dayStyles.hourLine, { top: idx * HOUR_HEIGHT }]} />
           ))}
 
-          {/* Карточки событий — позиция и высота строго пропорциональны времени */}
+          {/* Подсказка «нет событий» — плавающая внутри сетки */}
+          {events.length === 0 && (
+            <View style={[dayStyles.noEventsHint, { top: AUTO_SCROLL_HOUR * HOUR_HEIGHT + 24 }]}>
+              <Ionicons name="calendar-outline" size={22} color={MUTED} />
+              <Text style={dayStyles.noEventsText}>Нет задач · нажми + чтобы добавить</Text>
+            </View>
+          )}
+
+          {/* Карточки событий — позиционированы по формуле 24h */}
           {events.map((ev, i) => {
             const top        = timeToY(ev.date);
             const slotHeight = durationToH(ev.task.duration_minutes);
@@ -581,12 +592,7 @@ function DayView({
                 key={`${ev.task.id}_${ev.type}_${i}`}
                 style={[dayStyles.eventSlot, { top, height: slotHeight }]}
               >
-                {/* Адаптивный контент карточки зависит от высоты слота */}
-                <DayEventCard
-                  event={ev}
-                  slotHeight={slotHeight}
-                  onPress={onTaskPress}
-                />
+                <DayEventCard event={ev} slotHeight={slotHeight} onPress={onTaskPress} />
               </View>
             );
           })}
@@ -597,18 +603,10 @@ function DayView({
 }
 
 const dayStyles = StyleSheet.create({
-  empty: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 60,
-  },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: TEXT2 },
-  emptySub: {
-    fontSize: 13, color: MUTED, textAlign: 'center', paddingHorizontal: 32, lineHeight: 18,
-  },
-
   // Двухколоночный контейнер
   grid: { flexDirection: 'row' },
 
-  // Левая колонка
+  // Левая колонка — метки времени
   timeCol: { width: TIME_COL_W },
   timeRow: {
     position: 'absolute', left: 0, width: TIME_COL_W, height: HOUR_HEIGHT,
@@ -616,31 +614,92 @@ const dayStyles = StyleSheet.create({
   },
   timeLabel: { fontSize: 11, color: MUTED, fontWeight: '500' },
 
-  // Правая колонка
+  // Правая колонка — сетка + события
   eventsCol: {
     flex: 1,
-    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: 0.5,
     borderLeftColor: BORDER,
-    // overflow: 'visible' (default) — НЕ обрезаем карточки снизу
   },
   hourLine: {
     position: 'absolute', left: 0, right: 0,
-    height: StyleSheet.hairlineWidth, backgroundColor: BORDER,
+    height: 0.5, backgroundColor: BORDER,
   },
   eventSlot: {
     position: 'absolute',
     left:     4,
     right:    8,
-    // top + height задаются inline
-    // overflow: 'visible' — слот не обрезает карточку
-    // Внутренняя карточка (DayEventCard) сама управляет overflow: 'hidden'
   },
+
+  // «Нет событий» — плавает поверх сетки на уровне 08:00
+  noEventsHint: {
+    position: 'absolute', left: 0, right: 0,
+    alignItems: 'center', gap: 6,
+  },
+  noEventsText: { fontSize: 12, color: MUTED, fontStyle: 'italic' },
 });
 
-// ── WeekView ──────────────────────────────────────────────────────────────────
-// Фикс: DayStrip не дублируется, т.к. он скрыт в режиме «Неделя».
-// WeekView сам рендерит шапку из 7 колонок + тело с задачами.
-// Клик по заголовку дня переключает в режим «День» для этого дня.
+// ── WeekMiniCard — ультра-компактная карточка для недельной сетки ─────────────
+//
+// Каждая колонка дня ~ (ширина_экрана - TIME_COL_W) / 7 ≈ 46 px.
+// Карточка адаптируется к высоте слота: показывает только то, что помещается.
+
+function WeekMiniCard({
+  event,
+  slotHeight,
+  onPress,
+}: {
+  event: CalendarEvent;
+  slotHeight: number;
+  onPress?: (task: TodoTask) => void;
+}) {
+  const isDeadline = event.type === 'deadline';
+  const accent     = isDeadline ? DEADLINE_COLOR : SCHEDULE_COLOR;
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={() => onPress?.(event.task)}
+      style={[wmStyles.card, { borderLeftColor: accent, backgroundColor: `${accent}1E` }]}
+    >
+      {/* Время (если слот ≥ 20 px) */}
+      {slotHeight >= 20 && (
+        <Text style={[wmStyles.time, { color: accent }]} numberOfLines={1}>
+          {fmtTime(event.date)}
+        </Text>
+      )}
+      {/* Название (если слот ≥ 32 px) */}
+      {slotHeight >= 32 && (
+        <Text style={wmStyles.title} numberOfLines={slotHeight < 56 ? 1 : 2}>
+          {event.task.title}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+const wmStyles = StyleSheet.create({
+  card: {
+    flex: 1,
+    borderLeftWidth: 2,
+    borderRadius: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 2,
+    overflow: 'hidden',
+    gap: 1,
+  },
+  time:  { fontSize: 8,  fontWeight: '700', lineHeight: 10 },
+  title: { fontSize: 8,  fontWeight: '500', color: TEXT, lineHeight: 10 },
+});
+
+// ── WeekView — Google-style 24-часовая таблица с 7 колонками ─────────────────
+//
+// Структура:
+//   • Зафиксированная шапка (не прокручивается): день-недели + число.
+//   • Прокручиваемая сетка (ScrollView):
+//       - Левая колонка: метки времени 00:00–23:00.
+//       - 7 дневных колонок: горизонтальные линии сетки + карточки событий.
+//         Каждая карточка: position: 'absolute', top = timeToY, height = durationToH.
+//   • Авто-скролл к 08:00 при открытии.
 
 function WeekView({
   weekDays,
@@ -657,21 +716,33 @@ function WeekView({
   projectsMap: Map<string, { name: string; color: string }>;
   tabBarHeight: number;
   onTaskPress?: (task: TodoTask) => void;
-  onDayClick: (d: Date) => void; // переход в режим «День»
+  onDayClick: (d: Date) => void;
 }) {
+  const TOTAL_H  = HOURS.length * HOUR_HEIGHT + GRID_BUFFER;
+  const scrollRef = useRef<ScrollView>(null);
+
   const evsByDay = useMemo(
     () => weekDays.map(d => buildEventsForDay(allTasks, d, projectsMap)),
     [weekDays, allTasks, projectsMap],
   );
 
+  // Авто-скролл к 08:00 при монтировании
+  useEffect(() => {
+    const t = setTimeout(
+      () => scrollRef.current?.scrollTo({ y: AUTO_SCROLL_HOUR * HOUR_HEIGHT, animated: false }),
+      80,
+    );
+    return () => clearTimeout(t);
+  }, []);
+
   return (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: tabBarHeight + 80 }}
-      style={{ flex: 1 }}
-    >
-      {/* Шапка недели: 7 колонок */}
+    <View style={{ flex: 1 }}>
+
+      {/* ── Зафиксированная шапка: Пн–Вс + числа ─────────────────────── */}
       <View style={weekStyles.header}>
+        {/* Пустой спейсер под колонку времени */}
+        <View style={{ width: TIME_COL_W }} />
+
         {weekDays.map((day, i) => {
           const isToday = isSameDay(day, today);
           return (
@@ -692,51 +763,107 @@ function WeekView({
         })}
       </View>
 
-      {/* Тело: 7 колонок с задачами */}
-      <View style={weekStyles.body}>
-        {evsByDay.map((evs, di) => (
-          <View key={di} style={weekStyles.col}>
-            {evs.length === 0 ? (
-              <View style={weekStyles.colEmpty} />
-            ) : (
-              evs.map((ev, ei) => (
-                <EventCard
-                  key={`${ev.task.id}_${ev.type}_${ei}`}
-                  event={ev}
-                  onPress={onTaskPress}
-                  compact
-                />
-              ))
-            )}
+      {/* ── Прокручиваемая 24-часовая time-grid ─────────────────────────── */}
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: tabBarHeight + 80 }}
+      >
+        <View style={[weekStyles.gridContainer, { height: TOTAL_H }]}>
+
+          {/* Колонка времени */}
+          <View style={weekStyles.timeCol}>
+            {HOURS.map((hour, idx) => (
+              <View key={hour} style={[weekStyles.timeRow, { top: idx * HOUR_HEIGHT }]}>
+                <Text style={weekStyles.timeLabel}>{fmtHour(hour)}</Text>
+              </View>
+            ))}
           </View>
-        ))}
-      </View>
-    </ScrollView>
+
+          {/* 7 дневных колонок */}
+          {weekDays.map((day, di) => {
+            const evs = evsByDay[di] ?? [];
+            return (
+              <View key={di} style={[weekStyles.dayCol, { height: TOTAL_H }]}>
+
+                {/* Горизонтальные линии-разделители (тонкие, полупрозрачные) */}
+                {HOURS.map((hour, idx) => (
+                  <View
+                    key={`gl_${hour}`}
+                    style={[weekStyles.gridLine, { top: idx * HOUR_HEIGHT }]}
+                  />
+                ))}
+
+                {/* Карточки событий — те же формулы, что в DayView */}
+                {evs.map((ev, ei) => {
+                  const top        = timeToY(ev.date);
+                  const slotHeight = durationToH(ev.task.duration_minutes);
+                  return (
+                    <View
+                      key={`${ev.task.id}_${ev.type}_${ei}`}
+                      style={[weekStyles.eventSlot, { top, height: slotHeight }]}
+                    >
+                      <WeekMiniCard
+                        event={ev}
+                        slotHeight={slotHeight}
+                        onPress={onTaskPress}
+                      />
+                    </View>
+                  );
+                })}
+
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
 const weekStyles = StyleSheet.create({
+  // Зафиксированная шапка
   header: {
     flexDirection: 'row',
     backgroundColor: CARD,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 0.5,
     borderBottomColor: BORDER,
+    paddingVertical: 4,
   },
-  colHeader: { flex: 1, alignItems: 'center', paddingVertical: 8, gap: 4 },
-  colDay: { fontSize: 10, color: MUTED, fontWeight: '600', textTransform: 'uppercase' },
-  colNum: {
-    width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-  },
-  colNumToday: { backgroundColor: SCHEDULE_COLOR },
-  colNumText: { fontSize: 14, fontWeight: '700', color: TEXT },
-  colNumTextToday: { color: '#fff' },
+  colHeader: { flex: 1, alignItems: 'center', paddingVertical: 4, gap: 3 },
+  colDay:    { fontSize: 10, color: MUTED, fontWeight: '600', textTransform: 'uppercase' },
+  colNum:    { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  colNumToday:    { backgroundColor: SCHEDULE_COLOR },
+  colNumText:     { fontSize: 12, fontWeight: '700', color: TEXT },
+  colNumTextToday:{ color: '#fff' },
 
-  body: { flexDirection: 'row', flex: 1, marginTop: 4 },
-  col: {
-    flex: 1, padding: 3, gap: 3,
-    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: BORDER,
+  // Прокручиваемая сетка
+  gridContainer: { flexDirection: 'row' },
+
+  // Колонка времени
+  timeCol: { width: TIME_COL_W },
+  timeRow: {
+    position: 'absolute', left: 0, width: TIME_COL_W, height: HOUR_HEIGHT,
+    paddingTop: 3, paddingLeft: 8,
   },
-  colEmpty: { height: 16 },
+  timeLabel: { fontSize: 10, color: MUTED, fontWeight: '500' },
+
+  // Дневные колонки
+  dayCol: {
+    flex: 1,
+    borderLeftWidth: 0.5,
+    borderLeftColor: BORDER,
+  },
+  // Горизонтальные линии сетки — тонкие, полупрозрачные
+  gridLine: {
+    position: 'absolute', left: 0, right: 0,
+    height: 0.5, backgroundColor: BORDER,
+  },
+  // Слот события внутри дневной колонки
+  eventSlot: {
+    position: 'absolute', left: 1, right: 1,
+    overflow: 'hidden',
+  },
 });
 
 // ── MonthView ─────────────────────────────────────────────────────────────────
