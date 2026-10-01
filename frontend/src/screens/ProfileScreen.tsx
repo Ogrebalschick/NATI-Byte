@@ -668,33 +668,6 @@ const AuthenticatedProfile = () => {
         { paddingTop: insets.top, paddingBottom: tabBarHeight + 24 },
       ]}
     >
-      {showReviewBanner && (
-        <View style={styles.reviewBanner}>
-          <View style={styles.reviewTitleRow}>
-            <Ionicons name="alert-circle" size={20} color="#FF9F0A" />
-            <Text style={styles.reviewTitle}>
-              Пора проверить актуальность данных в профиле! ИИ BYTE помнит старую информацию
-            </Text>
-          </View>
-          <View style={styles.reviewActions}>
-            <TouchableOpacity
-              style={styles.reviewCheck}
-              onPress={() => router.push('/profile/facts')}
-              accessibilityRole="button"
-            >
-              <Text style={styles.reviewCheckText}>Проверить</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.reviewOk}
-              onPress={handleReviewStillValid}
-              accessibilityRole="button"
-            >
-              <Text style={styles.reviewOkText}>Всё актуально</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
       {successMessage && (
         <View style={styles.successBanner}>
           <Ionicons name="checkmark-circle" size={18} color="#30D158" />
@@ -731,6 +704,33 @@ const AuthenticatedProfile = () => {
         )}
         <Text style={styles.email}>{user?.email ?? ''}</Text>
       </View>
+
+      {showReviewBanner && (
+        <View style={styles.reviewBanner}>
+          <View style={styles.reviewTitleRow}>
+            <Ionicons name="alert-circle" size={20} color="#FF9F0A" />
+            <Text style={styles.reviewTitle}>
+              Пора проверить актуальность данных в профиле! ИИ BYTE помнит старую информацию
+            </Text>
+          </View>
+          <View style={styles.reviewActions}>
+            <TouchableOpacity
+              style={styles.reviewCheck}
+              onPress={() => router.push('/profile/facts')}
+              accessibilityRole="button"
+            >
+              <Text style={styles.reviewCheckText}>Проверить</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.reviewOk}
+              onPress={handleReviewStillValid}
+              accessibilityRole="button"
+            >
+              <Text style={styles.reviewOkText}>Всё актуально</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Menu */}
       <View style={styles.menu}>
@@ -1092,12 +1092,13 @@ const styles = StyleSheet.create({
   },
   nstuBannerButtonText: { color: '#1C1C1E', fontSize: 14, fontWeight: '700' },
   reviewBanner: {
-    backgroundColor: 'rgba(255, 159, 10, 0.16)',
+    backgroundColor: '#1C1C1E',
     borderWidth: 1,
-    borderColor: 'rgba(255, 159, 10, 0.45)',
+    borderColor: 'rgba(255, 159, 10, 0.55)',
     borderRadius: 14,
     padding: 14,
-    marginTop: 16,
+    marginTop: 8,
+    marginBottom: 16,
     gap: 12,
   },
   reviewTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
