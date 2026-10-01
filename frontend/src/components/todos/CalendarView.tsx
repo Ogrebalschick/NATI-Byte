@@ -5,21 +5,29 @@
  *   • День   — двухколоночная почасовая сетка (время слева, карточки справа).
  *              1 минута = 1 px (HOUR_HEIGHT = 60). Карточки занимают всю ширину
  *              правой колонки и абсолютно позиционированы внутри неё.
- *   • Неделя — 7 колонок без дублирующей ленты (DayStrip скрыт).
- *   • Месяц  — сетка месяца; клик по дню ОСТАЁТСЯ в режиме Месяца
- *              (подсветка + список задач внизу, без «телепортации» в День).
+ *              Горизонтальный свайп → предыдущий/следующий день.
+ *              Иконка 📅 слева от ленты открывает DateTimePicker.
+ *   • Неделя — 7 колонок с 24-часовой сеткой. Шапка содержит диапазон дат +
+ *              стрелки ◀ ▶. Горизонтальный свайп → предыдущая/следующая неделя.
+ *   • Месяц  — сетка месяца; первый тап = выбор дня (подсветка + список задач),
+ *              повторный тап по выбранному дню = переход в режим «День».
+ *              Горизонтальный свайп → предыдущий/следующий месяц.
  *
  * Лента DayStrip (28 дней) отображается ТОЛЬКО в режиме «День».
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  Modal,
+  PanResponder,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import type { TodoTask, TodoProject } from '../../storage/todosStorage';
 
@@ -58,6 +66,19 @@ const MEDIUM_H    = 75; // px — ниже этой границы: средни
 const TIME_COL_W  = 52; // ширина колонки времени
 const DAY_CELL_W  = 46; // ФИКСИРОВАННАЯ ширина ячейки в ленте дат
 const DAY_CELL_H  = 58; // ФИКСИРОВАННАЯ высота ячейки в ленте дат
+
+/**
+ * Час для авто-скролла при открытии (08:00).
+ * Скрывает пустые ночные часы 00–07, но оставляет доступными при прокрутке вверх.
+ */
+const AUTO_SCROLL_HOUR = 8;
+/** Запас снизу: задача у 23:00 с длительностью > 60 мин не обрезается. */
+const GRID_BUFFER = HOUR_HEIGHT * 2;
+
+/** Минимальная дистанция горизонтального свайпа для срабатывания навигации (px). */
+const SWIPE_MIN_DIST = 40;
+/** Минимальная скорость горизонтального свайпа (px/ms) — альтернативный триггер. */
+const SWIPE_MIN_VX   = 0.4;
 
 const WEEKDAY_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const WEEKDAY_MIN   = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -112,6 +133,19 @@ function fmtTime(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** Диапазон дат текущей недели для шапки WeekView (напр. «16–22 сентября 2024»). */
+function fmtWeekRange(weekDays: Date[]): string {
+  const first = weekDays[0]!;
+  const last  = weekDays[6]!;
+  if (first.getMonth() === last.getMonth()) {
+    return `${first.getDate()}–${last.getDate()} ${MONTHS_RU[first.getMonth()]} ${first.getFullYear()}`;
+  }
+  return (
+    `${first.getDate()} ${MONTHS_RU[first.getMonth()]} – ` +
+    `${last.getDate()} ${MONTHS_RU[last.getMonth()]} ${last.getFullYear()}`
+  );
+}
+
 function buildEventsForDay(
   tasks: TodoTask[],
   day: Date,
@@ -161,6 +195,50 @@ function durationToH(rawMinutes: number | string | null | undefined): number {
   const mins = Number(rawMinutes ?? 30);
   const safe  = isNaN(mins) || mins <= 0 ? 30 : mins;
   return Math.max(MIN_CARD_H, safe * PX_PER_MIN);
+}
+
+// ── SwipeableView — горизонтальный жест-детектор ──────────────────────────────
+//
+// Оборачивает контент и перехватывает ТОЛЬКО горизонтально-доминирующие жесты.
+// Вертикальная прокрутка дочерних ScrollView не затрагивается:
+//   • onMoveShouldSetPanResponder вернёт true только когда |dx| > |dy| * 1.8,
+//     что практически исключает случайный захват вертикального скролла.
+//
+// useMemo + useCallback гарантируют, что PanResponder пересоздаётся только
+// при смене самих колбэков (которые мемоизированы в CalendarView через useCallback).
+
+function SwipeableView({
+  onSwipeLeft,
+  onSwipeRight,
+  children,
+  style,
+}: {
+  onSwipeLeft: () => void;
+  onSwipeRight: () => void;
+  children: React.ReactNode;
+  style?: object;
+}) {
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        // Захватываем жест только если горизонтальное смещение явно преобладает
+        onMoveShouldSetPanResponder: (_, { dx, dy }) =>
+          Math.abs(dx) > 15 && Math.abs(dx) > Math.abs(dy) * 1.8,
+        onPanResponderRelease: (_, { dx, vx }) => {
+          if (dx < -SWIPE_MIN_DIST || vx < -SWIPE_MIN_VX) onSwipeLeft();
+          else if (dx > SWIPE_MIN_DIST || vx > SWIPE_MIN_VX) onSwipeRight();
+        },
+        onPanResponderTerminationRequest: () => true,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onSwipeLeft, onSwipeRight],
+  );
+
+  return (
+    <View style={[{ flex: 1 }, style]} {...panResponder.panHandlers}>
+      {children}
+    </View>
+  );
 }
 
 // ── ModeSegments ──────────────────────────────────────────────────────────────
@@ -214,67 +292,86 @@ const segStyles = StyleSheet.create({
 });
 
 // ── DayStrip (только для режима «День») ───────────────────────────────────────
+//
+// Иконка 📅 слева открывает DateTimePicker для быстрого перехода к любой дате.
 
 function DayStrip({
   days,
   today,
   selectedDay,
   onSelect,
+  onCalendarPress,
 }: {
   days: Date[];
   today: Date;
   selectedDay: Date;
   onSelect: (d: Date) => void;
+  /** Открыть DateTimePicker для прыжка к произвольной дате */
+  onCalendarPress: () => void;
 }) {
   const listRef = useRef<FlatList>(null);
 
   return (
-    <FlatList
-      ref={listRef}
-      data={days}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      keyExtractor={d => d.toISOString()}
-      contentContainerStyle={stripStyles.content}
-      style={stripStyles.strip}
-      getItemLayout={(_, index) => ({
-        length: DAY_CELL_W + 6,
-        offset: (DAY_CELL_W + 6) * index,
-        index,
-      })}
-      renderItem={({ item: day }) => {
-        const isToday    = isSameDay(day, today);
-        const isSelected = isSameDay(day, selectedDay);
-        return (
-          <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={() => onSelect(day)}
-            style={[
-              stripStyles.cell,
-              isToday && !isSelected && stripStyles.cellToday,
-              isSelected && stripStyles.cellSelected,
-            ]}
-          >
-            {/* Фиксированная ширина — исключает reflow при смене выбранного дня */}
-            <Text style={[stripStyles.dayName, isSelected && stripStyles.textSelected]}>
-              {WEEKDAY_SHORT[day.getDay()]}
-            </Text>
-            <Text style={[
-              stripStyles.dayNum,
-              isToday && !isSelected && stripStyles.dayNumToday,
-              isSelected && stripStyles.textSelected,
-            ]}>
-              {day.getDate()}
-            </Text>
-          </TouchableOpacity>
-        );
-      }}
-    />
+    <View style={stripStyles.row}>
+      {/* Кнопка быстрого пикера дат */}
+      <TouchableOpacity
+        style={stripStyles.calBtn}
+        onPress={onCalendarPress}
+        activeOpacity={0.7}
+        hitSlop={8}
+      >
+        <Ionicons name="calendar-outline" size={20} color={TEXT2} />
+      </TouchableOpacity>
+
+      <FlatList
+        ref={listRef}
+        data={days}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={d => d.toISOString()}
+        contentContainerStyle={stripStyles.content}
+        style={stripStyles.strip}
+        getItemLayout={(_, index) => ({
+          length: DAY_CELL_W + 6,
+          offset: (DAY_CELL_W + 6) * index,
+          index,
+        })}
+        renderItem={({ item: day }) => {
+          const isToday    = isSameDay(day, today);
+          const isSelected = isSameDay(day, selectedDay);
+          return (
+            <TouchableOpacity
+              activeOpacity={0.75}
+              onPress={() => onSelect(day)}
+              style={[
+                stripStyles.cell,
+                isToday && !isSelected && stripStyles.cellToday,
+                isSelected && stripStyles.cellSelected,
+              ]}
+            >
+              {/* Фиксированная ширина — исключает reflow при смене выбранного дня */}
+              <Text style={[stripStyles.dayName, isSelected && stripStyles.textSelected]}>
+                {WEEKDAY_SHORT[day.getDay()]}
+              </Text>
+              <Text style={[
+                stripStyles.dayNum,
+                isToday && !isSelected && stripStyles.dayNumToday,
+                isSelected && stripStyles.textSelected,
+              ]}>
+                {day.getDate()}
+              </Text>
+            </TouchableOpacity>
+          );
+        }}
+      />
+    </View>
   );
 }
 
 const stripStyles = StyleSheet.create({
-  strip: { flexGrow: 0, backgroundColor: CARD },
+  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: CARD },
+  calBtn: { paddingHorizontal: 12, paddingVertical: 10 },
+  strip: { flex: 1, flexGrow: 1 },
   content: { paddingHorizontal: 8, paddingVertical: 6, gap: 6 },
   cell: {
     // Фиксированные размеры → нет скачков при переключении дней
@@ -503,31 +600,14 @@ const evStyles = StyleSheet.create({
 
 // ── DayView ───────────────────────────────────────────────────────────────────
 //
-// Двухколоночный layout:
-//   • Левая колонка (TIME_COL_W) — абсолютные метки времени.
-//   • Правая колонка (flex: 1)   — position: relative, содержит:
-//       - горизонтальные линии часов (position: absolute)
-//       - карточки событий (position: absolute, top/height рассчитаны точно)
-//
-// Высота карточки = duration_minutes * PX_PER_MIN (без верхнего предела).
-// Карточки у нижней границы сетки не обрезаются: к TOTAL_H добавлен буфер.
-
-/**
- * Час для авто-скролла при открытии (08:00).
- * Скрывает пустые ночные часы 00–07, но оставляет доступными при прокрутке вверх.
- */
-const AUTO_SCROLL_HOUR = 8;
-/** Запас снизу: задача у 23:00 с длительностью > 60 мин не обрезается. */
-const GRID_BUFFER = HOUR_HEIGHT * 2;
-
-// ── DayView ───────────────────────────────────────────────────────────────────
-//
 // 24-часовая двухколоночная сетка:
 //   • Левая колонка (TIME_COL_W) — метки времени 00:00–23:00.
 //   • Правая колонка (flex: 1)   — горизонтальные линии + абсолютные карточки.
 //
 // Авто-скролл к 08:00 при монтировании: пользователь видит рабочие часы,
 // но может прокрутить вверх к ночным (00–07).
+//
+// Горизонтальный свайп обрабатывается снаружи — через SwipeableView в CalendarView.
 
 function DayView({
   events,
@@ -694,12 +774,14 @@ const wmStyles = StyleSheet.create({
 // ── WeekView — Google-style 24-часовая таблица с 7 колонками ─────────────────
 //
 // Структура:
+//   • Навигационная строка: ◀ «16–22 сентября 2024» ▶
 //   • Зафиксированная шапка (не прокручивается): день-недели + число.
 //   • Прокручиваемая сетка (ScrollView):
 //       - Левая колонка: метки времени 00:00–23:00.
 //       - 7 дневных колонок: горизонтальные линии сетки + карточки событий.
 //         Каждая карточка: position: 'absolute', top = timeToY, height = durationToH.
 //   • Авто-скролл к 08:00 при открытии.
+//   • Горизонтальный свайп → onPrevWeek / onNextWeek.
 
 function WeekView({
   weekDays,
@@ -709,6 +791,8 @@ function WeekView({
   tabBarHeight,
   onTaskPress,
   onDayClick,
+  onPrevWeek,
+  onNextWeek,
 }: {
   weekDays: Date[];
   today: Date;
@@ -717,6 +801,8 @@ function WeekView({
   tabBarHeight: number;
   onTaskPress?: (task: TodoTask) => void;
   onDayClick: (d: Date) => void;
+  onPrevWeek: () => void;
+  onNextWeek: () => void;
 }) {
   const TOTAL_H  = HOURS.length * HOUR_HEIGHT + GRID_BUFFER;
   const scrollRef = useRef<ScrollView>(null);
@@ -736,7 +822,18 @@ function WeekView({
   }, []);
 
   return (
-    <View style={{ flex: 1 }}>
+    <SwipeableView onSwipeLeft={onNextWeek} onSwipeRight={onPrevWeek}>
+
+      {/* ── Навигационная строка: ◀ диапазон недели ▶ ──────────────────── */}
+      <View style={weekStyles.navBar}>
+        <TouchableOpacity onPress={onPrevWeek} hitSlop={12} style={weekStyles.navBtn}>
+          <Ionicons name="chevron-back" size={20} color={TEXT2} />
+        </TouchableOpacity>
+        <Text style={weekStyles.navTitle}>{fmtWeekRange(weekDays)}</Text>
+        <TouchableOpacity onPress={onNextWeek} hitSlop={12} style={weekStyles.navBtn}>
+          <Ionicons name="chevron-forward" size={20} color={TEXT2} />
+        </TouchableOpacity>
+      </View>
 
       {/* ── Зафиксированная шапка: Пн–Вс + числа ─────────────────────── */}
       <View style={weekStyles.header}>
@@ -817,11 +914,25 @@ function WeekView({
           })}
         </View>
       </ScrollView>
-    </View>
+    </SwipeableView>
   );
 }
 
 const weekStyles = StyleSheet.create({
+  // ── Навигационная строка (◀ дата ▶) ───────────────────────────────────────
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    backgroundColor: BG,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: BORDER,
+  },
+  navBtn:   { padding: 4 },
+  navTitle: { fontSize: 14, fontWeight: '600', color: TEXT, flex: 1, textAlign: 'center' },
+
   // Зафиксированная шапка
   header: {
     flexDirection: 'row',
@@ -867,8 +978,11 @@ const weekStyles = StyleSheet.create({
 });
 
 // ── MonthView ─────────────────────────────────────────────────────────────────
-// Фикс: клик по дню = selectedDay меняется, но режим НЕ переключается в «День».
-// Под сеткой отображается список задач выбранного дня.
+//
+// Логика тапов по дням:
+//   • Первый тап по незаполненному дню → setSelectedDay (подсветка + список задач).
+//   • Тап по уже выбранному дню → onDayDoubleTap → переключение в режим «День».
+// Горизонтальный свайп обрабатывается снаружи через SwipeableView в CalendarView.
 
 function MonthView({
   monthDate,
@@ -878,7 +992,8 @@ function MonthView({
   projectsMap,
   tabBarHeight,
   onTaskPress,
-  onDaySelect,  // только обновляет selectedDay, не меняет режим
+  onDaySelect,
+  onDayDoubleTap,
   onMonthChange,
 }: {
   monthDate: Date;
@@ -888,7 +1003,10 @@ function MonthView({
   projectsMap: Map<string, { name: string; color: string }>;
   tabBarHeight: number;
   onTaskPress?: (task: TodoTask) => void;
+  /** Первый тап — только выбирает день (подсветка + список задач). */
   onDaySelect: (d: Date) => void;
+  /** Повторный тап по уже выбранному дню → перейти в режим «День». */
+  onDayDoubleTap: (d: Date) => void;
   onMonthChange: (d: Date) => void;
 }) {
   const year  = monthDate.getFullYear();
@@ -971,8 +1089,8 @@ function MonthView({
               return (
                 <TouchableOpacity
                   key={col}
-                  // ↓ Только выбирает день внутри Месяца — НЕ телепортирует в День
-                  onPress={() => onDaySelect(day)}
+                  // Первый тап — выбирает день. Повторный тап по тому же дню → режим «День».
+                  onPress={() => isSameDay(day, selectedDay) ? onDayDoubleTap(day) : onDaySelect(day)}
                   activeOpacity={0.7}
                   style={[
                     monthStyles.dayCell,
@@ -1011,6 +1129,11 @@ function MonthView({
               : 'нет событий'}
           </Text>
         </Text>
+        {selectedEvents.length > 0 && (
+          <Text style={monthStyles.doubleTapHint}>
+            Нажми дважды на выбранный день, чтобы открыть его подробнее
+          </Text>
+        )}
         {selectedEvents.map((ev, i) => (
           <EventCard
             key={`${ev.task.id}_${ev.type}_${i}`}
@@ -1055,6 +1178,10 @@ const monthStyles = StyleSheet.create({
   dayEvents: { paddingHorizontal: 16, gap: 8 },
   dayEventsTitle: { fontSize: 13, fontWeight: '700', color: TEXT2, marginBottom: 4 },
   dayEventsCount: { fontWeight: '400', color: MUTED },
+  doubleTapHint: {
+    fontSize: 11, color: MUTED, fontStyle: 'italic',
+    marginBottom: 4, marginTop: -4,
+  },
 });
 
 // ── CalendarView (корневой компонент) ─────────────────────────────────────────
@@ -1073,11 +1200,12 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
     return d;
   }, []);
 
-  const [calendarMode, setCalendarMode] = useState<CalendarMode>('day');
-  const [selectedDay,  setSelectedDay]  = useState<Date>(today);
-  const [monthDate,    setMonthDate]    = useState<Date>(
+  const [calendarMode,   setCalendarMode]   = useState<CalendarMode>('day');
+  const [selectedDay,    setSelectedDay]    = useState<Date>(today);
+  const [monthDate,      setMonthDate]      = useState<Date>(
     new Date(today.getFullYear(), today.getMonth(), 1),
   );
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // 28 дней (4 недели) от понедельника текущей недели
   const days = useMemo<Date[]>(() => {
@@ -1112,22 +1240,64 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
     [tasks, selectedDay, projectsMap],
   );
 
+  // ── Навигация: День ──────────────────────────────────────────────────────
+
+  /** Свайп влево в Day view → следующий день */
+  const handleNextDay = useCallback(() => {
+    setSelectedDay(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; });
+  }, []);
+  /** Свайп вправо в Day view → предыдущий день */
+  const handlePrevDay = useCallback(() => {
+    setSelectedDay(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; });
+  }, []);
+
+  // ── Навигация: Неделя ────────────────────────────────────────────────────
+
+  /** Свайп влево или ▶ в Week view → следующая неделя */
+  const handleNextWeek = useCallback(() => {
+    setSelectedDay(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; });
+  }, []);
+  /** Свайп вправо или ◀ в Week view → предыдущая неделя */
+  const handlePrevWeek = useCallback(() => {
+    setSelectedDay(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; });
+  }, []);
+
+  // ── Навигация: Месяц ─────────────────────────────────────────────────────
+
+  /** Свайп влево в Month view → следующий месяц */
+  const handleNextMonth = useCallback(() => {
+    setMonthDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+  }, []);
+  /** Свайп вправо в Month view → предыдущий месяц */
+  const handlePrevMonth = useCallback(() => {
+    setMonthDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+  }, []);
+
+  // ── Тапы по дням ─────────────────────────────────────────────────────────
+
   /**
    * Клик по дню в режиме «Неделя» → переключить в «День» для этого дня.
    */
-  const handleWeekDayClick = (d: Date) => {
+  const handleWeekDayClick = useCallback((d: Date) => {
     setSelectedDay(d);
     setCalendarMode('day');
-  };
+  }, []);
 
   /**
-   * Клик по дню в режиме «Месяц» → только выбрать день (подсветить),
-   * режим НЕ меняется (фикс «телепортации»).
+   * Первый тап по дню в «Месяце» → только выбрать (подсветить + список задач).
+   * Режим НЕ меняется (фикс «телепортации»).
    */
-  const handleMonthDaySelect = (d: Date) => {
+  const handleMonthDaySelect = useCallback((d: Date) => {
     setSelectedDay(d);
-    // monthDate обновляем только если перешли в другой месяц (через стрелки навигации)
-  };
+  }, []);
+
+  /**
+   * Повторный тап по уже выбранному дню в «Месяце» → переход в режим «День».
+   */
+  const handleMonthDayDoubleTap = useCallback((d: Date) => {
+    setSelectedDay(d);
+    setCalendarMode('day');
+  }, []);
 
   const dayLabel = `${WEEKDAY_SHORT[selectedDay.getDay()]}, ${selectedDay.getDate()} ${MONTHS_RU[selectedDay.getMonth()]}`;
 
@@ -1139,7 +1309,7 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
 
       {/*
        * ── Лента дат (ТОЛЬКО в режиме «День») ─────────────────────────────
-       * В режиме «Неделя» — своя шапка из 7 столбцов внутри WeekView.
+       * В режиме «Неделя» — своя шапка из 7 столбцов + навбар внутри WeekView.
        * В режиме «Месяц» — своя сетка внутри MonthView.
        */}
       {calendarMode === 'day' && (
@@ -1148,6 +1318,7 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
           today={today}
           selectedDay={selectedDay}
           onSelect={d => setSelectedDay(d)}
+          onCalendarPress={() => setShowDatePicker(true)}
         />
       )}
 
@@ -1165,14 +1336,19 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
 
       {/* ── Основной контент ────────────────────────────────────────────── */}
       <View style={{ flex: 1 }}>
+
+        {/* Режим «День»: время-сетка обёрнута в SwipeableView для навигации по дням */}
         {calendarMode === 'day' && (
-          <DayView
-            events={dayEvents}
-            tabBarHeight={tabBarHeight}
-            onTaskPress={onTaskPress}
-          />
+          <SwipeableView onSwipeLeft={handleNextDay} onSwipeRight={handlePrevDay}>
+            <DayView
+              events={dayEvents}
+              tabBarHeight={tabBarHeight}
+              onTaskPress={onTaskPress}
+            />
+          </SwipeableView>
         )}
 
+        {/* Режим «Неделя»: WeekView сам содержит SwipeableView + навбар со стрелками */}
         {calendarMode === 'week' && (
           <WeekView
             weekDays={weekDays}
@@ -1182,27 +1358,91 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
             tabBarHeight={tabBarHeight}
             onTaskPress={onTaskPress}
             onDayClick={handleWeekDayClick}
+            onPrevWeek={handlePrevWeek}
+            onNextWeek={handleNextWeek}
           />
         )}
 
+        {/* Режим «Месяц»: MonthView обёрнута в SwipeableView для навигации по месяцам */}
         {calendarMode === 'month' && (
-          <MonthView
-            monthDate={monthDate}
-            today={today}
-            selectedDay={selectedDay}
-            allTasks={tasks}
-            projectsMap={projectsMap}
-            tabBarHeight={tabBarHeight}
-            onTaskPress={onTaskPress}
-            onDaySelect={handleMonthDaySelect}
-            onMonthChange={d => {
-              setMonthDate(d);
-              // При смене месяца выбираем 1-е число нового месяца
-              setSelectedDay(new Date(d.getFullYear(), d.getMonth(), 1));
-            }}
-          />
+          <SwipeableView onSwipeLeft={handleNextMonth} onSwipeRight={handlePrevMonth}>
+            <MonthView
+              monthDate={monthDate}
+              today={today}
+              selectedDay={selectedDay}
+              allTasks={tasks}
+              projectsMap={projectsMap}
+              tabBarHeight={tabBarHeight}
+              onTaskPress={onTaskPress}
+              onDaySelect={handleMonthDaySelect}
+              onDayDoubleTap={handleMonthDayDoubleTap}
+              onMonthChange={d => {
+                setMonthDate(d);
+                // При смене месяца выбираем 1-е число нового месяца
+                setSelectedDay(new Date(d.getFullYear(), d.getMonth(), 1));
+              }}
+            />
+          </SwipeableView>
         )}
       </View>
+
+      {/*
+       * ── Быстрый пикер дат (только в режиме «День») ──────────────────────
+       *
+       * Android: DateTimePicker рендерится напрямую — нативный диалог появляется
+       *          поверх приложения и закрывается после выбора.
+       *
+       * iOS: DateTimePicker показывается в bottom-sheet Modal с кнопкой «Готово».
+       *      display="inline" даёт полноценный встроенный календарь.
+       */}
+      {showDatePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={selectedDay}
+          mode="date"
+          display="default"
+          onChange={(_: DateTimePickerEvent, date?: Date) => {
+            setShowDatePicker(false);
+            if (date) setSelectedDay(date);
+          }}
+          themeVariant="dark"
+        />
+      )}
+
+      {Platform.OS === 'ios' && (
+        <Modal
+          transparent
+          animationType="slide"
+          visible={showDatePicker}
+          onRequestClose={() => setShowDatePicker(false)}
+        >
+          {/* Полупрозрачный фон — тап закрывает пикер */}
+          <TouchableOpacity
+            style={rootStyles.pickerBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowDatePicker(false)}
+          >
+            {/* Bottom-sheet контейнер — тап внутри не закрывает */}
+            <View style={rootStyles.pickerSheet} onStartShouldSetResponder={() => true}>
+              <View style={rootStyles.pickerHandle} />
+              <DateTimePicker
+                value={selectedDay}
+                mode="date"
+                display="inline"
+                onChange={(_: DateTimePickerEvent, date?: Date) => {
+                  if (date) setSelectedDay(date);
+                }}
+                themeVariant="dark"
+              />
+              <TouchableOpacity
+                style={rootStyles.pickerDoneBtn}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <Text style={rootStyles.pickerDoneText}>Готово</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -1225,4 +1465,35 @@ const rootStyles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
   },
   countBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+
+  // ── DateTimePicker bottom-sheet (iOS) ─────────────────────────────────────
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    backgroundColor: CARD,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 34,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  pickerHandle: {
+    width: 40, height: 4,
+    borderRadius: 2,
+    backgroundColor: BORDER,
+    marginTop: 12, marginBottom: 4,
+  },
+  pickerDoneBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    marginTop: 8,
+  },
+  pickerDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: SCHEDULE_COLOR,
+  },
 });
