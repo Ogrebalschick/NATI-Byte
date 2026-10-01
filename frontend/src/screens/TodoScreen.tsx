@@ -74,6 +74,21 @@ const MONTHS_SHORT = [
 
 type ViewMode = 'list' | 'calendar';
 
+// ── Metric filter ─────────────────────────────────────────────────────────────
+
+/**
+ * Ключ активного фильтра дашборда.
+ * null = нет фильтра, задачи отображаются в обычной проектной структуре.
+ */
+type MetricFilter = 'total' | 'in_progress' | 'today' | 'completed';
+
+interface MetricsData {
+  total:       number; // Все задачи в области видимости
+  in_progress: number; // !is_completed
+  today:       number; // due_date или schedule_date == сегодня
+  completed:   number; // is_completed === true
+}
+
 // ── Helper utilities ──────────────────────────────────────────────────────────
 
 function sortTasks(tasks: TodoTask[]): TodoTask[] {
@@ -266,6 +281,123 @@ const TaskCard = React.memo(function TaskCard({
   );
 });
 
+// ── Metrics dashboard ─────────────────────────────────────────────────────────
+
+const METRIC_CONFIG: Array<{
+  key:    MetricFilter;
+  label:  string;
+  icon:   React.ComponentProps<typeof Ionicons>['name'];
+  accent: string;
+}> = [
+  { key: 'total',       label: 'Всего дел',  icon: 'layers-outline',           accent: '#8E8E93' },
+  { key: 'in_progress', label: 'В работе',   icon: 'time-outline',             accent: '#0A84FF' },
+  { key: 'today',       label: 'На сегодня', icon: 'calendar-outline',         accent: '#FF9F0A' },
+  { key: 'completed',   label: 'Выполнено',  icon: 'checkmark-circle-outline', accent: '#30D158' },
+];
+
+/**
+ * MetricsBlock — горизонтальная строка из 4 интерактивных карточек-метрик.
+ *
+ * Каждая карточка:
+ *  - Круглая иконка в тон акцентному цвету
+ *  - Крупное число (значение метрики)
+ *  - Мелкий подзаголовок
+ *
+ * Тап по карточке активирует фильтр (список задач фильтруется по этому критерию).
+ * Повторный тап по активной карточке снимает фильтр.
+ * Рамка карточки подсвечивается акцентным цветом при активации.
+ */
+const MetricsBlock = React.memo(function MetricsBlock({
+  metrics,
+  activeFilter,
+  onFilter,
+}: {
+  metrics:      MetricsData;
+  activeFilter: MetricFilter | null;
+  onFilter:     (f: MetricFilter | null) => void;
+}) {
+  const values: Record<MetricFilter, number> = {
+    total:       metrics.total,
+    in_progress: metrics.in_progress,
+    today:       metrics.today,
+    completed:   metrics.completed,
+  };
+
+  return (
+    <View style={metricStyles.row}>
+      {METRIC_CONFIG.map(cfg => {
+        const isActive = activeFilter === cfg.key;
+        return (
+          <TouchableOpacity
+            key={cfg.key}
+            activeOpacity={0.72}
+            onPress={() => onFilter(isActive ? null : cfg.key)}
+            style={[metricStyles.card, isActive && { borderColor: cfg.accent }]}
+          >
+            {/* Иконка в цветном кружке */}
+            <View style={[metricStyles.iconCircle, { backgroundColor: `${cfg.accent}22` }]}>
+              <Ionicons name={cfg.icon} size={15} color={cfg.accent} />
+            </View>
+            {/* Крупное значение */}
+            <Text style={[metricStyles.value, isActive && { color: cfg.accent }]}>
+              {values[cfg.key]}
+            </Text>
+            {/* Подпись */}
+            <Text style={metricStyles.label} numberOfLines={2}>
+              {cfg.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+});
+
+const metricStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 2,
+    gap: 8,
+  },
+  card: {
+    flex: 1,
+    backgroundColor: CARD,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    gap: 4,
+    // Прозрачная рамка всегда — исключает прыжок размера при активации
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  iconCircle: {
+    width: 30, height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 1,
+  },
+  value: {
+    fontSize: 21,
+    fontWeight: '800',
+    color: TEXT,
+    lineHeight: 26,
+  },
+  label: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: TEXT2,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    lineHeight: 12,
+    paddingHorizontal: 2,
+  },
+});
+
 // ── Main Screen ───────────────────────────────────────────────────────────────
 
 export default function TodoScreen() {
@@ -281,6 +413,10 @@ export default function TodoScreen() {
   const [modalVisible, setModalVisible]     = useState(false);
   const [editingTask, setEditingTask]       = useState<TodoTask | null>(null);
   const [viewMode, setViewMode]             = useState<ViewMode>('list');
+  const [metricFilter, setMetricFilter]     = useState<MetricFilter | null>(null);
+
+  // Сброс фильтра метрик при смене выбранного проекта
+  useEffect(() => { setMetricFilter(null); }, [selectedProjectId]);
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
@@ -587,6 +723,70 @@ export default function TodoScreen() {
 
   const allTasks = useMemo(() => flattenAllTasks(data), [data]);
 
+  // ── Метрики дашборда ──────────────────────────────────────────────────────
+
+  /**
+   * Плоский список задач в рамках выбранного проекта / inbox.
+   * Пересчитывается при смене проекта или обновлении данных.
+   */
+  const scopedTasks = useMemo<TodoTask[]>(() => {
+    if (selectedProjectId === 'inbox') return data.inbox_tasks;
+    const proj = data.projects.find(p => p.id === selectedProjectId);
+    if (!proj) return [];
+    return [
+      ...proj.inbox_tasks,
+      ...proj.sections.flatMap(s => s.tasks),
+    ];
+  }, [selectedProjectId, data]);
+
+  /** 4 метрики для дашборда, пересчитываемые при любом изменении данных */
+  const metrics = useMemo<MetricsData>(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
+    const inToday = (dateStr: string | null | undefined): boolean => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return d >= todayStart && d < todayEnd;
+    };
+
+    return {
+      total:       scopedTasks.length,
+      in_progress: scopedTasks.filter(t => !t.is_completed).length,
+      today:       scopedTasks.filter(t => inToday(t.due_date) || inToday(t.schedule_date)).length,
+      completed:   scopedTasks.filter(t => t.is_completed).length,
+    };
+  }, [scopedTasks]);
+
+  /**
+   * Задачи из области видимости, отфильтрованные по активной метрике.
+   * Используется для плоского вида, когда фильтр активен.
+   */
+  const filteredScopedTasks = useMemo<TodoTask[]>(() => {
+    if (!metricFilter) return scopedTasks;
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
+    const inToday = (s: string | null | undefined) => {
+      if (!s) return false;
+      const d = new Date(s);
+      return d >= todayStart && d < todayEnd;
+    };
+
+    switch (metricFilter) {
+      case 'total':       return scopedTasks;
+      case 'in_progress': return scopedTasks.filter(t => !t.is_completed);
+      case 'today':       return scopedTasks.filter(t => inToday(t.due_date) || inToday(t.schedule_date));
+      case 'completed':   return scopedTasks.filter(t => t.is_completed);
+      default:            return scopedTasks;
+    }
+  }, [scopedTasks, metricFilter]);
+
   const defaultModalProjectId = selectedProjectId !== 'inbox' ? selectedProjectId : null;
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -689,6 +889,17 @@ export default function TodoScreen() {
       ) : (
         /* ── List mode ─────────────────────────────────────────────────── */
         <>
+          {/*
+           * Дашборд метрик: 4 карточки (Всего / В работе / На сегодня / Выполнено).
+           * Числа пересчитываются при смене проекта или обновлении данных.
+           * Тап активирует фильтр → задачи ниже фильтруются; повторный тап снимает.
+           */}
+          <MetricsBlock
+            metrics={metrics}
+            activeFilter={metricFilter}
+            onFilter={setMetricFilter}
+          />
+
           {/* Project chips */}
           <ScrollView
             horizontal
@@ -712,13 +923,45 @@ export default function TodoScreen() {
             ))}
           </ScrollView>
 
+          {/* Индикатор активного фильтра */}
+          {metricFilter !== null && (
+            <View style={styles.filterBar}>
+              <Ionicons name="funnel-outline" size={12} color={TEXT2} />
+              <Text style={styles.filterBarText}>
+                {METRIC_CONFIG.find(c => c.key === metricFilter)?.label ?? 'Фильтр'}
+                {' '}· {filteredScopedTasks.length} задач
+              </Text>
+              <TouchableOpacity
+                onPress={() => setMetricFilter(null)}
+                hitSlop={8}
+                style={styles.filterBarClose}
+              >
+                <Ionicons name="close-circle" size={15} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Content */}
           <ScrollView
             style={styles.content}
             contentContainerStyle={[styles.contentInner, { paddingBottom: tabBarHeight + 80 }]}
             showsVerticalScrollIndicator={false}
           >
-            {selectedProjectId === 'inbox' ? (
+            {/*
+             * Когда фильтр метрики активен → показываем плоский отфильтрованный список.
+             * Когда нет → обычная структура с проектами и разделами.
+             */}
+            {metricFilter !== null ? (
+              filteredScopedTasks.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="search-outline" size={48} color={MUTED} />
+                  <Text style={styles.emptyTitle}>Нет задач</Text>
+                  <Text style={styles.emptySubtitle}>По этому фильтру задач не найдено</Text>
+                </View>
+              ) : (
+                renderTaskList(filteredScopedTasks)
+              )
+            ) : selectedProjectId === 'inbox' ? (
               data.inbox_tasks.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="checkbox-outline" size={56} color={MUTED} />
@@ -847,6 +1090,24 @@ const styles = StyleSheet.create({
   modeBtnActive: { backgroundColor: '#0A84FF' },
   modeBtnLabel: { fontSize: 12, fontWeight: '600', color: TEXT2 },
   modeBtnLabelActive: { color: '#fff' },
+
+  // ── Filter bar (активный фильтр метрики) ──────────────────────────────────
+  filterBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: CARD2,
+    borderRadius: 8,
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: BORDER,
+  },
+  filterBarText: { fontSize: 12, color: TEXT2, flex: 1, fontWeight: '500' },
+  filterBarClose: { padding: 2 },
 
   // ── Project chips ─────────────────────────────────────────────────────────
   chipsScroll: { flexGrow: 0, marginTop: 10 },
