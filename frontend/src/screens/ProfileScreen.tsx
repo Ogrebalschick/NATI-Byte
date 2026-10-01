@@ -17,8 +17,10 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { ScreenWrapper } from '../components/ScreenWrapper';
+import { AppLockSettingsModal } from '../components/security/AppLockSettingsModal';
 import { useAuth } from '../context/AuthContext';
 import { NstuImportModal } from '../components/NstuImportModal';
+import { describeAppLock, getBiometricsEnabled, getUserPin } from '../storage/appLockStorage';
 
 // ─── Guest wall ────────────────────────────────────────────────────────────────
 
@@ -508,6 +510,8 @@ const AuthenticatedProfile = () => {
   const [isWebViewVisible, setIsWebViewVisible] = useState(false);
   const [is2FAEnabled, setIs2FAEnabled] = useState(user?.is_2fa_enabled ?? false);
   const [togglingFA, setTogglingFA] = useState(false);
+  const [showAppLock, setShowAppLock] = useState(false);
+  const [appLockHint, setAppLockHint] = useState('PIN-код и биометрия');
   const nstuSuccessTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -515,6 +519,22 @@ const AuthenticatedProfile = () => {
     const timer = setTimeout(() => setSuccessMessage(null), 3500);
     return () => clearTimeout(timer);
   }, [successMessage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const pin = await getUserPin();
+        const bio = pin ? await getBiometricsEnabled() : false;
+        if (!cancelled) setAppLockHint(describeAppLock(pin, bio));
+      } catch (error) {
+        console.warn('Failed to read app-lock hint', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showAppLock]);
 
   const handleLogout = () => {
     Alert.alert('Выход', 'Вы уверены, что хотите выйти?', [
@@ -689,6 +709,20 @@ const AuthenticatedProfile = () => {
       {/* Security section */}
       <Text style={styles.sectionLabel}>БЕЗОПАСНОСТЬ</Text>
       <View style={styles.menu}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => setShowAppLock(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Защита приложения"
+        >
+          <Ionicons name="lock-closed-outline" size={24} color="#fff" />
+          <View style={styles.menuTextCol}>
+            <Text style={styles.menuText}>Защита приложения</Text>
+            <Text style={styles.menuSubtext}>{appLockHint}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.menuItem} onPress={openPasswordModal}>
           <Ionicons name="key-outline" size={24} color="#fff" />
           <Text style={styles.menuText}>Изменить пароль</Text>
@@ -766,6 +800,8 @@ const AuthenticatedProfile = () => {
         onClose={() => setShowDeleteModal(false)}
         onConfirm={deleteAccount}
       />
+
+      <AppLockSettingsModal visible={showAppLock} onClose={() => setShowAppLock(false)} />
     </ScrollView>
   );
 };

@@ -52,6 +52,13 @@
         {
           "faceIDPermission": "Разрешите $(PRODUCT_NAME) использовать Face ID для входа в приложение."
         }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Разрешите $(PRODUCT_NAME) использовать Face ID для входа в приложение."
+        }
       ]
     ],
     "experiments": {

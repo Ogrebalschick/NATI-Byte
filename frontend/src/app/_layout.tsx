@@ -2,12 +2,14 @@
 import 'punycode/';
 
 // Per rules.md §3.1 — Guest Mode Support:
-// The app must boot directly into the tab navigator. Auth must never
+// The app must boot directly into the tab navigator. Account auth must never
 // block initial access. The auth wall lives only inside ProfileScreen.
+// AppLockGate is separate: it covers the UI on a cold start only when a device PIN is set.
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import * as NavigationBar from 'expo-navigation-bar';
+import { AppLockGate } from '../components/security/AppLockGate';
 import { AuthProvider } from '../context/AuthContext';
 import { SyncStatusBanner } from '../components/SyncStatusBanner';
 
@@ -25,13 +27,15 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <Stack screenOptions={{ headerShown: false }}>
-        {/* index.tsx redirects straight to /(tabs)/chat for all users */}
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="auth" />
-      </Stack>
-      <SyncStatusBanner />
+      <AppLockGate>
+        <Stack screenOptions={{ headerShown: false }}>
+          {/* index.tsx redirects straight to /(tabs)/chat for all users */}
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="auth" />
+        </Stack>
+        <SyncStatusBanner />
+      </AppLockGate>
     </AuthProvider>
   );
 }
