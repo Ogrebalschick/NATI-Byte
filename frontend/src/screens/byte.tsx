@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuth, API_URL } from '../context/AuthContext';
+import { useAuth, getApiUrl } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import HelloByte from '@/components/byte/helloByte';
 import Input from '@/components/byte/input';
@@ -375,7 +375,7 @@ const Byte = () => {
     });
 
     try {
-      const response = await fetch(`${API_URL}/ask`, {
+      const response = await fetch(`${getApiUrl()}/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: conversation }),

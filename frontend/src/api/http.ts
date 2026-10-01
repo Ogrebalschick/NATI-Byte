@@ -1,4 +1,4 @@
-import { API_URL } from './config';
+import { getApiUrl } from './config';
 
 export class SessionExpiredError extends Error {
   constructor() {
@@ -48,7 +48,7 @@ export async function apiFetch(
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  const response = await fetch(`${getApiUrl()}${path}`, { ...init, headers });
   if (response.status === 401 && token) {
     await notifySessionExpired();
     throw new SessionExpiredError();

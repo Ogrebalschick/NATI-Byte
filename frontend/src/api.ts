@@ -1,1 +1,7 @@
-export const API_URL = 'http://localhost:8000'; // для эмулятора Android используйте 10.0.2.2, для iOS и реальных устройств - IP вашего компьютера
+export {
+  getApiUrl,
+  updateApiUrl,
+  resetApiUrl,
+  hydrateApiUrl,
+  defaultApiUrl,
+} from './api/config';

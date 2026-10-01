@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { API_URL } from '../api/config';
+import { getApiUrl, hydrateApiUrl } from '../api/config';
 import { apiFetch, isSessionExpired, setAuthSessionActive, setSessionExpiredHandler } from '../api/http';
 import { currentDeviceName } from '../deviceName';
 import {
@@ -10,7 +10,7 @@ import {
 } from '../components/NstuImportModal';
 import { clearDepartedUserChatCache } from '../storage/chatStorage';
 
-export { API_URL };
+export { getApiUrl };
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -108,6 +108,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const loadStoredData = async () => {
     try {
+      await hydrateApiUrl();
       const storedToken = await AsyncStorage.getItem('@auth_token');
       const storedUser = await AsyncStorage.getItem('@auth_user');
       if (storedToken && storedUser) {
@@ -151,7 +152,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // ── Login ────────────────────────────────────────────────────────────────────
 
   const login = async (email: string, password: string) => {
-    const response = await fetch(`${API_URL}/auth/login`, {
+    const response = await fetch(`${getApiUrl()}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: authBody({ email, password }),
@@ -175,7 +176,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const verifyLogin = async (email: string, code: string) => {
-    const response = await fetch(`${API_URL}/auth/login/verify`, {
+    const response = await fetch(`${getApiUrl()}/auth/login/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: authBody({ email, code }),
@@ -193,7 +194,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // ── Registration ─────────────────────────────────────────────────────────────
 
   const requestRegisterCode = async (email: string, password: string, name: string) => {
-    const response = await fetch(`${API_URL}/auth/register/init`, {
+    const response = await fetch(`${getApiUrl()}/auth/register/init`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, name }),
@@ -207,7 +208,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const verifyRegister = async (email: string, code: string) => {
-    const response = await fetch(`${API_URL}/auth/register/verify`, {
+    const response = await fetch(`${getApiUrl()}/auth/register/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: authBody({ email, code }),
@@ -301,7 +302,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const nstuLogin = async (email: string) => {
-    const response = await fetch(`${API_URL}/auth/nstu-login`, {
+    const response = await fetch(`${getApiUrl()}/auth/nstu-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: authBody({ email }),
