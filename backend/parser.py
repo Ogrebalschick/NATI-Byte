@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_gigachat import GigaChat
 from sqlalchemy.orm import Session
 
-from auth import decode_token, oauth2_scheme
+from auth import oauth2_scheme, resolve_user
 from database import StudentData, User, get_db
 from models import CabinetParseRequest
 
@@ -368,10 +368,7 @@ def parse_cabinet(
     if not data.raw_text or not data.raw_text.strip():
         raise HTTPException(status_code=400, detail="raw_text не должен быть пустым")
 
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    user = resolve_user(token, db)
 
     print(f"[SYNC] Parsing {page_type} for user_id={user.id}")
 
@@ -429,10 +426,7 @@ def get_student_data(
     db: Session = Depends(get_db),
 ):
     """Return stored cabinet JSON snapshots for the current user."""
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    user = resolve_user(token, db)
 
     requested = [t.strip().lower() for t in (types or "").split(",") if t.strip()]
     query = db.query(StudentData).filter(StudentData.user_id == user.id)

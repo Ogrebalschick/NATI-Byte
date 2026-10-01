@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_gigachat import GigaChat
 from sqlalchemy.orm import Session
 
-from auth import decode_token, oauth2_scheme
+from auth import oauth2_scheme, resolve_user
 from database import Note, User, get_db
 from models import NoteCreate, NoteUpdate
 
@@ -36,11 +36,7 @@ _WORD = re.compile(r"[A-Za-zА-Яа-яЁё0-9\-]+")
 
 
 def _current_user(token: str, db: Session) -> User:
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return user
+    return resolve_user(token, db)
 
 
 def _owned_note(db: Session, user: User, note_id: int) -> Note:

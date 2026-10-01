@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from auth import decode_token, oauth2_scheme
+from auth import oauth2_scheme, resolve_user
 from database import User, UserFact, get_db
 from models import UserFactUpdate, UserFactsCreate, UserFactsGroupedResponse
 
@@ -84,14 +84,7 @@ def _same_fact(candidate: str, stored: str) -> bool:
 
 
 def _current_user(token: str, db: Session) -> User:
-    payload = decode_token(token)
-    user_id = payload.get("id")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Недействительный токен")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return user
+    return resolve_user(token, db)
 
 
 def _owned_fact(db: Session, user: User, fact_id: int) -> UserFact:

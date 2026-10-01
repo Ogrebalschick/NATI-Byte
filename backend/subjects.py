@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from auth import decode_token, oauth2_scheme
+from auth import oauth2_scheme, resolve_user
 from database import CustomSubject, ScoreLog, User, get_db
 from models import CustomSubjectCreate, ScoreLogCreate
 
@@ -15,11 +15,7 @@ router = APIRouter(prefix="/subjects", tags=["subjects"])
 
 
 def _current_user(token: str, db: Session) -> User:
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return user
+    return resolve_user(token, db)
 
 
 def _owned_subject(db: Session, user: User, subject_id: int) -> CustomSubject:

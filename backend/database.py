@@ -29,6 +29,7 @@ class User(Base):
     custom_subjects = relationship("CustomSubject", back_populates="user", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="user", cascade="all, delete-orphan")
     facts = relationship("UserFact", back_populates="user", cascade="all, delete-orphan")
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
 
 
 class Chat(Base):
@@ -112,6 +113,23 @@ class UserFact(Base):
     user = relationship("User", back_populates="facts")
 
 
+class UserSession(Base):
+    """One logged-in device. Deleting the row invalidates that device's JWT."""
+    __tablename__ = "user_sessions"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    device_name = Column(String, nullable=False, default="Неизвестное устройство")
+    ip_address = Column(String, nullable=True)
+    last_active = Column(DateTime, default=datetime.utcnow, nullable=False)
+    user = relationship("User", back_populates="sessions")
+
+
 def _run_migrations() -> None:
     """Lightweight schema migration: create missing tables and add missing columns."""
     # create_all is idempotent and will add new tables without dropping existing data.
@@ -160,6 +178,20 @@ def _run_migrations() -> None:
                     conn.execute(text(ddl))
                     conn.commit()
                     print(f"[DB] Added missing column notes.{col_name}")
+
+        if "user_sessions" in tables:
+            session_cols = [c["name"] for c in inspector.get_columns("user_sessions")]
+            session_patches = {
+                "user_id": "ALTER TABLE user_sessions ADD COLUMN user_id INTEGER",
+                "device_name": "ALTER TABLE user_sessions ADD COLUMN device_name VARCHAR",
+                "ip_address": "ALTER TABLE user_sessions ADD COLUMN ip_address VARCHAR",
+                "last_active": "ALTER TABLE user_sessions ADD COLUMN last_active DATETIME",
+            }
+            for col_name, ddl in session_patches.items():
+                if col_name not in session_cols:
+                    conn.execute(text(ddl))
+                    conn.commit()
+                    print(f"[DB] Added missing column user_sessions.{col_name}")
 
         if "user_facts" in tables:
             fact_cols = [c["name"] for c in inspector.get_columns("user_facts")]

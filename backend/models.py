@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Dict, List, Optional
 from datetime import datetime
 
@@ -15,6 +15,7 @@ class VerifyRegister(BaseModel):
     """Step 2 of registration: confirm the 6-digit code received by email."""
     email: EmailStr
     code: str
+    device_name: Optional[str] = Field(default=None, max_length=120)
 
 
 # ── Login / 2FA ───────────────────────────────────────────────────────────────
@@ -22,11 +23,13 @@ class VerifyRegister(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    device_name: Optional[str] = Field(default=None, max_length=120)
 
 class VerifyLogin(BaseModel):
     """2FA step: confirm the 6-digit code sent after a successful credential check."""
     email: EmailStr
     code: str
+    device_name: Optional[str] = Field(default=None, max_length=120)
 
 
 # ── Responses ─────────────────────────────────────────────────────────────────
@@ -75,6 +78,16 @@ class CabinetParseRequest(BaseModel):
 class NstuLoginRequest(BaseModel):
     """One-click login / register via NSTU ID (email scraped from the cabinet)."""
     email: EmailStr
+    device_name: Optional[str] = Field(default=None, max_length=120)
+
+
+class UserSessionResponse(BaseModel):
+    """One device where the account is currently signed in."""
+    id: str
+    device_name: str
+    ip_address: Optional[str] = None
+    last_active: datetime
+    is_current: bool = False
 
 
 class SetPasswordRequest(BaseModel):

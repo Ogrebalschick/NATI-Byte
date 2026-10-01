@@ -1,11 +1,13 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 import bcrypt
 import jwt
 import random
+import re
 import smtplib
 import threading
+import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -19,9 +21,10 @@ from models import (
     PasswordResetConfirm,
     NstuLoginRequest,
     SetPasswordRequest,
+    UserSessionResponse,
 )
 
-from database import get_db, User, Chat
+from database import get_db, User, Chat, UserSession
 
 load_dotenv()
 
@@ -84,6 +87,115 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Срок действия токена истёк")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Недействительный токен")
+
+_ANDROID_MODEL = re.compile(r";\s*([^;)]+?)\s+Build/", re.IGNORECASE)
+_LAST_ACTIVE_TOUCH = timedelta(seconds=60)
+
+
+def _clean_label(value: str, limit: int = 120) -> str:
+    cleaned = "".join(ch for ch in value if ch.isprintable()).strip()
+    return cleaned[:limit]
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    candidate = forwarded.split(",")[0].strip() if forwarded else ""
+    if not candidate and request.client is not None:
+        candidate = (request.client.host or "").strip()
+    candidate = _clean_label(candidate, 64)
+    return candidate or None
+
+
+def _resolve_device_name(request: Request, explicit: str | None) -> str:
+    """Prefer the name sent by the app. Otherwise read a short label from User-Agent."""
+    if explicit:
+        named = _clean_label(explicit)
+        if named:
+            return named
+
+    ua = request.headers.get("user-agent", "") or ""
+    model = _ANDROID_MODEL.search(ua)
+    if model:
+        label = _clean_label(model.group(1))
+        if label and label.lower() not in {"u", "wv", "mobile"}:
+            return label
+    if "iPad" in ua:
+        return "iPad"
+    if "iPhone" in ua:
+        return "iPhone"
+    if "Android" in ua:
+        return "Android"
+    if "Windows" in ua:
+        return "Windows"
+    if "Macintosh" in ua or "Mac OS" in ua:
+        return "Mac"
+    if "Linux" in ua:
+        return "Linux"
+    return "Неизвестное устройство"
+
+
+def _issue_token(db: Session, user: User, request: Request, device_name: str | None) -> str:
+    """Persist a device session and return a JWT that carries its id."""
+    session_id = str(uuid.uuid4())
+    db.add(UserSession(
+        id=session_id,
+        user_id=user.id,
+        device_name=_resolve_device_name(request, device_name),
+        ip_address=_client_ip(request),
+        last_active=datetime.utcnow(),
+    ))
+    db.commit()
+    print(f"[AUTH] Session opened user_id={user.id}")
+    return create_access_token({
+        "sub": user.email,
+        "id": user.id,
+        "session_id": session_id,
+    })
+
+
+def resolve_user(token: str, db: Session, request: Request | None = None) -> User:
+    """Decode the JWT and reject it when its session row is gone."""
+    payload = decode_token(token)
+    session_id = payload.get("session_id")
+    user_id = payload.get("id")
+    if not session_id or user_id is None:
+        raise HTTPException(status_code=401, detail="Сессия недействительна. Войдите снова.")
+
+    session = (
+        db.query(UserSession)
+        .filter(UserSession.id == session_id, UserSession.user_id == user_id)
+        .first()
+    )
+    if session is None:
+        raise HTTPException(status_code=401, detail="Сессия завершена. Войдите снова.")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Сессия недействительна. Войдите снова.")
+
+    now = datetime.utcnow()
+    if session.last_active is None or now - session.last_active >= _LAST_ACTIVE_TOUCH:
+        session.last_active = now
+        db.commit()
+
+    if request is not None:
+        request.state.session_id = session.id
+    return user
+
+
+def get_current_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    return resolve_user(token, db, request)
+
+
+def _current_session_id(request: Request) -> str:
+    session_id = getattr(request.state, "session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Сессия недействительна. Войдите снова.")
+    return session_id
 
 def generate_code() -> str:
     return str(random.randint(100000, 999999))
@@ -231,7 +343,7 @@ def register_init(data: RegisterInit, db: Session = Depends(get_db)):
 
 
 @router.post("/register/verify")
-def register_verify(data: VerifyRegister, db: Session = Depends(get_db)):
+def register_verify(data: VerifyRegister, request: Request, db: Session = Depends(get_db)):
     """
     Step 2: verify the 6-digit code, create the user, and return a JWT (auto-login).
     """
@@ -263,7 +375,7 @@ def register_verify(data: VerifyRegister, db: Session = Depends(get_db)):
     with _store_lock:
         _pending_reg.pop(data.email, None)
 
-    token = create_access_token({"sub": db_user.email, "id": db_user.id})
+    token = _issue_token(db, db_user, request, data.device_name)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -274,7 +386,7 @@ def register_verify(data: VerifyRegister, db: Session = Depends(get_db)):
 # ── Login (with optional 2FA) ─────────────────────────────────────────────────
 
 @router.post("/login")
-def login(data: UserLogin, db: Session = Depends(get_db)):
+def login(data: UserLogin, request: Request, db: Session = Depends(get_db)):
     """
     Login endpoint.
     - If 2FA is disabled: returns JWT immediately.
@@ -296,7 +408,7 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
         send_verification_email(data.email, code, purpose="входа в аккаунт")
         return {"status": "requires_verification"}
 
-    token = create_access_token({"sub": user.email, "id": user.id})
+    token = _issue_token(db, user, request, data.device_name)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -306,7 +418,7 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/nstu-login")
-def nstu_login(data: NstuLoginRequest, db: Session = Depends(get_db)):
+def nstu_login(data: NstuLoginRequest, request: Request, db: Session = Depends(get_db)):
     """
     One-click login / register using an email scraped from the NSTU cabinet.
     New accounts are created without a BYTE password (has_password=False).
@@ -333,7 +445,7 @@ def nstu_login(data: NstuLoginRequest, db: Session = Depends(get_db)):
         db.commit()
         print(f"[AUTH] NSTU ID login user_id={user.id} email={email}")
 
-    token = create_access_token({"sub": user.email, "id": user.id})
+    token = _issue_token(db, user, request, data.device_name)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -344,7 +456,7 @@ def nstu_login(data: NstuLoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login/verify")
-def login_verify(data: VerifyLogin, db: Session = Depends(get_db)):
+def login_verify(data: VerifyLogin, request: Request, db: Session = Depends(get_db)):
     """2FA step: verify code and return JWT."""
     with _store_lock:
         pending = _pending_login.get(data.email)
@@ -368,7 +480,7 @@ def login_verify(data: VerifyLogin, db: Session = Depends(get_db)):
     with _store_lock:
         _pending_login.pop(data.email, None)
 
-    token = create_access_token({"sub": user.email, "id": user.id})
+    token = _issue_token(db, user, request, data.device_name)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -378,31 +490,82 @@ def login_verify(data: VerifyLogin, db: Session = Depends(get_db)):
 
 # ── Authenticated endpoints ───────────────────────────────────────────────────
 
-@router.get("/me")
-def get_me(
-    token: str = Depends(oauth2_scheme),
+def _session_payload(row: UserSession, current_id: str) -> UserSessionResponse:
+    return UserSessionResponse(
+        id=row.id,
+        device_name=row.device_name,
+        ip_address=row.ip_address,
+        last_active=row.last_active,
+        is_current=row.id == current_id,
+    )
+
+
+@router.get("/sessions", response_model=list[UserSessionResponse])
+def list_sessions(
+    request: Request,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    """Devices where this account is signed in. The caller is marked is_current."""
+    current_id = _current_session_id(request)
+    rows = (
+        db.query(UserSession)
+        .filter(UserSession.user_id == user.id)
+        .order_by(UserSession.last_active.desc())
+        .all()
+    )
+    return [_session_payload(row, current_id) for row in rows]
+
+
+@router.delete("/sessions/other")
+def revoke_other_sessions(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Sign out every device except the one making this request."""
+    current_id = _current_session_id(request)
+    revoked = (
+        db.query(UserSession)
+        .filter(UserSession.user_id == user.id, UserSession.id != current_id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"status": "deleted", "revoked": revoked}
+
+
+@router.delete("/sessions/{session_id}")
+def revoke_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Sign out one device. A missing or foreign session looks the same."""
+    row = (
+        db.query(UserSession)
+        .filter(UserSession.id == session_id, UserSession.user_id == user.id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    db.delete(row)
+    db.commit()
+    return {"status": "deleted"}
+
+
+@router.get("/me")
+def get_me(user: User = Depends(get_current_user)):
     return _user_to_dict(user) | {"created_at": user.created_at}
 
 
 @router.delete("/delete")
 def delete_account(
-    token: str = Depends(oauth2_scheme),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Permanently delete the authenticated user and all their chats (cascaded).
     """
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
     db.delete(user)
     db.commit()
     return {"status": "deleted", "message": "Аккаунт успешно удалён"}
@@ -411,15 +574,10 @@ def delete_account(
 @router.patch("/2fa")
 def set_2fa(
     data: Set2FARequest,
-    token: str = Depends(oauth2_scheme),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Enable or disable two-factor authentication for the authenticated user."""
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
     user.is_2fa_enabled = data.enabled
     db.commit()
     return {
@@ -431,15 +589,9 @@ def set_2fa(
 
 @router.post("/password-reset/request")
 def password_reset_request(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Send a 6-digit code to the authenticated user's email for a password change."""
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
     code = generate_code()
     expires = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
     with _store_lock:
@@ -456,17 +608,12 @@ def password_reset_request(
 @router.post("/password-reset/confirm")
 def password_reset_confirm(
     data: PasswordResetConfirm,
-    token: str = Depends(oauth2_scheme),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Verify the email code and persist the new bcrypt-hashed password."""
     if len(data.new_password) < 6:
         raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 6 символов")
-
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
 
     with _store_lock:
         pending = _pending_password.get(user.id)
@@ -492,17 +639,12 @@ def password_reset_confirm(
 @router.post("/set-password")
 def set_password(
     data: SetPasswordRequest,
-    token: str = Depends(oauth2_scheme),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Set a BYTE password for NSTU-ID accounts that currently have an empty hash."""
     if len(data.new_password) < 6:
         raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 6 символов")
-
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
 
     user.password_hash = get_password_hash(data.new_password)
     db.commit()
@@ -513,14 +655,9 @@ def set_password(
 @router.post("/chats/save")
 def save_chat(
     data: ChatSave,
-    token: str = Depends(oauth2_scheme),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
     chat = db.query(Chat).filter(Chat.id == data.id, Chat.user_id == user.id).first()
     if chat:
         chat.title = data.title
@@ -536,14 +673,9 @@ def save_chat(
 
 @router.get("/chats")
 def get_chats(
-    token: str = Depends(oauth2_scheme),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    payload = decode_token(token)
-    user = db.query(User).filter(User.id == payload["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
     return [
         {
             "id": c.id,
