@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Dict, List, Optional, Union
 from datetime import datetime
+import re
 
 
 # ── Registration ──────────────────────────────────────────────────────────────
@@ -40,6 +41,34 @@ class UserResponse(BaseModel):
     name: str
     created_at: datetime
     is_2fa_enabled: bool = False
+    wake_time: Optional[str] = "08:00"
+    sleep_time: Optional[str] = "22:30"
+
+
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class UserUpdate(BaseModel):
+    """
+    Personal morning and evening clock, Novosibirsk local time.
+
+    Omitted fields are left unchanged. A value must be "HH:MM".
+    Defaults match the columns on `users` for clients that send a full body.
+    """
+    wake_time: Optional[str] = "08:00"
+    sleep_time: Optional[str] = "22:30"
+
+    @field_validator("wake_time", "sleep_time")
+    @classmethod
+    def _validate_clock(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if _HHMM.fullmatch(text) is None:
+            raise ValueError("Время укажите в формате ЧЧ:ММ, например 07:30")
+        return text
 
 
 # ── Chats ─────────────────────────────────────────────────────────────────────

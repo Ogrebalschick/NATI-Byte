@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from models import (
     RegisterInit, VerifyRegister,
     UserLogin, VerifyLogin,
-    UserResponse, ChatSave, Set2FARequest,
+    UserResponse, UserUpdate, ChatSave, Set2FARequest,
     PasswordResetConfirm,
     NstuLoginRequest,
     SetPasswordRequest,
@@ -213,6 +213,8 @@ def _user_to_dict(user: User) -> dict:
         "student_group": user.student_group,
         "is_synced_with_nstu": bool(user.is_synced_with_nstu),
         "has_password": _has_password(user),
+        "wake_time": user.wake_time or "08:00",
+        "sleep_time": user.sleep_time or "22:30",
     }
 
 
@@ -556,6 +558,32 @@ def revoke_session(
 @router.get("/me")
 def get_me(user: User = Depends(get_current_user)):
     return _user_to_dict(user) | {"created_at": user.created_at}
+
+
+@router.patch("/profile/schedule")
+def update_profile_schedule(
+    data: UserUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Save the student's biorhythm clock.
+
+    `wake_time` fires the morning wish, `sleep_time` the evening one.
+    Both are "HH:MM" in Novosibirsk time. Only fields present in the body change.
+    """
+    provided = data.model_fields_set
+    if "wake_time" in provided:
+        user.wake_time = data.wake_time or "08:00"
+    if "sleep_time" in provided:
+        user.sleep_time = data.sleep_time or "22:30"
+    db.commit()
+    db.refresh(user)
+    return {
+        "status": "updated",
+        "wake_time": user.wake_time or "08:00",
+        "sleep_time": user.sleep_time or "22:30",
+    }
 
 
 @router.delete("/delete")

@@ -390,6 +390,8 @@ users (1) ──── (N) notifications
 | `full_name` | String | nullable | ФИО из ЛК НГТУ (парсится автоматически) |
 | `student_group` | String | nullable | Группа из ЛК НГТУ (пр.: «АВТ-31») |
 | `is_synced_with_nstu` | Boolean | default=False | True после первой успешной синхронизации |
+| `wake_time` | String | NOT NULL, default=`"08:00"` | Время пробуждения, Новосибирск, формат `ЧЧ:ММ`. Утренний пуш (`push_slot=morning`) |
+| `sleep_time` | String | NOT NULL, default=`"22:30"` | Время отхода ко сну, Новосибирск, формат `ЧЧ:ММ`. Вечерний пуш (`push_slot=evening`) |
 
 **Связи (cascade=all, delete-orphan):**
 - `chats` → `Chat`
@@ -601,7 +603,7 @@ Markdown-заметки студента с AI-категоризацией.
 | `body` | Text | NOT NULL, default="" | Тело уведомления (пр.: «Через 30 минут истекает срок сдачи РГЗ») |
 | `category` | String | NOT NULL, default="tasks", index | Категория: `tasks` \| `reminders` \| `wishes` |
 | `image_url` | String | nullable | Относительный URL картинки, например `/static/memes/cat.png`. Файл лежит в `backend/static/memes/`. Пусто, если карточка без мема |
-| `push_slot` | String | nullable, index | Слот автоматического пуша: `morning` (08:00, пожелание) \| `evening` (22:30, поддержка перед сном). `NULL` у остальных карточек |
+| `push_slot` | String | nullable, index | Слот автоматического пуша: `morning` (в `users.wake_time`) \| `evening` (в `users.sleep_time`). `NULL` у остальных карточек |
 | `is_read` | Boolean | NOT NULL, default=False | Прочитано ли пользователем |
 | `created_at` | DateTime | NOT NULL, default=now, index | Дата создания (используется для сортировки: новейшие первые). Хранится как naive UTC |
 
@@ -654,7 +656,8 @@ class AskRequest(BaseModel):
 | `POST` | `/auth/login` | `UserLogin` | `{access_token, ...}` или `{status: "requires_verification"}` | Вход по email+password. При 2FA возвращает статус вместо токена |
 | `POST` | `/auth/login/verify` | `VerifyLogin` | `{access_token, token_type, user}` | 2FA: подтверждение кода после `/auth/login` |
 | `POST` | `/auth/nstu-login` | `NstuLoginRequest` | `{access_token, token_type, has_password, created, user}` | Вход/регистрация через НГТУ ID (email из ЛК). Новые аккаунты создаются без BYTE-пароля |
-| `GET` 🔒 | `/auth/me` | — | `UserResponse + {created_at}` | Данные текущего пользователя |
+| `GET` 🔒 | `/auth/me` | — | `UserResponse + {created_at}` | Данные текущего пользователя, включая `wake_time` и `sleep_time` |
+| `PATCH` 🔒 | `/auth/profile/schedule` | `UserUpdate` | `{status, wake_time, sleep_time}` | Сохранить биоритм. Поля `ЧЧ:ММ`. В теле можно передать только одно из них — второе не затирается |
 | `DELETE` 🔒 | `/auth/delete` | — | `{status, message}` | Необратимое удаление аккаунта и всех связанных данных |
 | `PATCH` 🔒 | `/auth/2fa` | `Set2FARequest` | `{status, is_2fa_enabled, message}` | Включить/выключить двухфакторную аутентификацию |
 | `POST` 🔒 | `/auth/password-reset/request` | — | `{status, message}` | Отправить код смены пароля на email пользователя |
@@ -697,6 +700,15 @@ class PasswordResetConfirm(BaseModel):
 
 class SetPasswordRequest(BaseModel):
     new_password: str   # минимум 6 символов
+
+class UserResponse(BaseModel):
+    # ...id, email, name, created_at, is_2fa_enabled
+    wake_time: Optional[str] = "08:00"    # ЧЧ:ММ, Новосибирск
+    sleep_time: Optional[str] = "22:30"
+
+class UserUpdate(BaseModel):
+    wake_time: Optional[str] = "08:00"    # валидатор ЧЧ:ММ; None в теле сбрасывает к дефолту
+    sleep_time: Optional[str] = "22:30"
 
 class UserSessionResponse(BaseModel):
     id: str
@@ -989,14 +1001,14 @@ class UnreadCountResponse(BaseModel):
 
 ### 3.7.1 Умные пожелания (`backend/wishes.py`)
 
-Фоновая задача внутри процесса FastAPI (lifespan в `main.py`). Отдельный cron-пакет не нужен. Цикл просыпается каждые 30 секунд и смотрит локальное время **Новосибирска (UTC+7)**:
+Фоновая задача внутри процесса FastAPI (lifespan в `main.py`, цикл `async`). Отдельный cron-пакет не нужен. Каждые 30 секунд планировщик читает текущую минуту **Новосибирска (UTC+7)** и сравнивает её с `wake_time` и `sleep_time` каждого пользователя. Совпадение минуты запускает пуш. Некорректная строка в колонке заменяется дефолтом `08:00` / `22:30`.
 
-| Окно | Слот | Функция | `category` | `push_slot` |
-|------|------|---------|------------|-------------|
-| 08:00–08:01 | утро | `generate_morning_wish(user_id)` | `wishes` | `morning` |
-| 22:30–22:31 | вечер | `generate_evening_wish(user_id)` | `reminders` | `evening` |
+| Совпадение | Слот | Функция | `category` | `push_slot` |
+|------------|------|---------|------------|-------------|
+| `HH:MM` == `users.wake_time` | утро | `generate_morning_wish(user_id)` | `wishes` | `morning` |
+| `HH:MM` == `users.sleep_time` | вечер | `generate_evening_wish(user_id)` | `reminders` | `evening` |
 
-Планировщик обходит всех пользователей. Если у студента уже есть карточка этого `push_slot` за текущие новосибирские сутки, второй раз за день она не создаётся. Тестовый `POST /notifications/trigger-magic` тоже пишет `push_slot`, поэтому крон в этот день повторную карточку того же слота не создаст.
+Если у студента уже есть карточка этого `push_slot` за текущие новосибирские сутки, второй раз за день она не создаётся. Тестовый `POST /notifications/trigger-magic` тоже пишет `push_slot`, поэтому крон в этот день повторную карточку того же слота не создаст. Время меняется через `PATCH /auth/profile/schedule`.
 
 **Утро.** Вариация выбирается случайно, затем уходит в GigaChat вместе с `UserFact` (имя, пол, интересы):
 
@@ -1032,39 +1044,40 @@ class UnreadCountResponse(BaseModel):
 | 11 | POST | `/auth/password-reset/request` | 🔒 | auth |
 | 12 | POST | `/auth/password-reset/confirm` | 🔒 | auth |
 | 13 | POST | `/auth/set-password` | 🔒 | auth |
-| 14 | POST | `/auth/chats/save` | 🔒 | auth |
-| 15 | GET | `/auth/chats` | 🔒 | auth |
-| 16 | GET | `/auth/sessions` | 🔒 | auth |
-| 17 | DELETE | `/auth/sessions/other` | 🔒 | auth |
-| 18 | DELETE | `/auth/sessions/{session_id}` | 🔒 | auth |
-| 19 | POST | `/sync/parse-cabinet` | 🔒 | parser |
-| 20 | GET | `/sync/student-data` | 🔒 | parser |
-| 21 | POST | `/subjects` | 🔒 | subjects |
-| 22 | GET | `/subjects` | 🔒 | subjects |
-| 23 | POST | `/subjects/{id}/scores` | 🔒 | subjects |
-| 24 | DELETE | `/subjects/{id}/scores/{score_id}` | 🔒 | subjects |
-| 25 | GET | `/notes` | 🔒 | notes |
-| 26 | POST | `/notes` | 🔒 | notes |
-| 27 | PUT | `/notes/{note_id}` | 🔒 | notes |
-| 28 | DELETE | `/notes/{note_id}` | 🔒 | notes |
-| 29 | GET | `/profile/facts` | 🔒 | facts |
-| 30 | POST | `/profile/facts` | 🔒 | facts |
-| 31 | PUT | `/profile/facts/{fact_id}` | 🔒 | facts |
-| 32 | DELETE | `/profile/facts/all` | 🔒 | facts |
-| 33 | DELETE | `/profile/facts/{fact_id}` | 🔒 | facts |
-| 34 | GET | `/todos/data` | 🔒 | todos |
-| 35 | POST | `/todos/projects` | 🔒 | todos |
-| 36 | POST | `/todos/sections` | 🔒 | todos |
-| 37 | PUT | `/todos/sections/{section_id}` | 🔒 | todos |
-| 38 | POST | `/todos/tasks` | 🔒 | todos |
-| 39 | PUT | `/todos/tasks/{task_id}` | 🔒 | todos |
-| 40 | DELETE | `/todos/tasks/{task_id}` | 🔒 | todos |
-| 41 | GET | `/notifications` | 🔒 | notifications |
-| 42 | GET | `/notifications/unread-count` | 🔒 | notifications |
-| 43 | PATCH | `/notifications/{id}/read` | 🔒 | notifications |
-| 44 | POST | `/notifications/read-all` | 🔒 | notifications |
-| 45 | POST | `/notifications/trigger-magic` | 🔒 | notifications |
-| 46 | POST | `/notifications` | 🔒 | notifications |
+| 14 | PATCH | `/auth/profile/schedule` | 🔒 | auth |
+| 15 | POST | `/auth/chats/save` | 🔒 | auth |
+| 16 | GET | `/auth/chats` | 🔒 | auth |
+| 17 | GET | `/auth/sessions` | 🔒 | auth |
+| 18 | DELETE | `/auth/sessions/other` | 🔒 | auth |
+| 19 | DELETE | `/auth/sessions/{session_id}` | 🔒 | auth |
+| 20 | POST | `/sync/parse-cabinet` | 🔒 | parser |
+| 21 | GET | `/sync/student-data` | 🔒 | parser |
+| 22 | POST | `/subjects` | 🔒 | subjects |
+| 23 | GET | `/subjects` | 🔒 | subjects |
+| 24 | POST | `/subjects/{id}/scores` | 🔒 | subjects |
+| 25 | DELETE | `/subjects/{id}/scores/{score_id}` | 🔒 | subjects |
+| 26 | GET | `/notes` | 🔒 | notes |
+| 27 | POST | `/notes` | 🔒 | notes |
+| 28 | PUT | `/notes/{note_id}` | 🔒 | notes |
+| 29 | DELETE | `/notes/{note_id}` | 🔒 | notes |
+| 30 | GET | `/profile/facts` | 🔒 | facts |
+| 31 | POST | `/profile/facts` | 🔒 | facts |
+| 32 | PUT | `/profile/facts/{fact_id}` | 🔒 | facts |
+| 33 | DELETE | `/profile/facts/all` | 🔒 | facts |
+| 34 | DELETE | `/profile/facts/{fact_id}` | 🔒 | facts |
+| 35 | GET | `/todos/data` | 🔒 | todos |
+| 36 | POST | `/todos/projects` | 🔒 | todos |
+| 37 | POST | `/todos/sections` | 🔒 | todos |
+| 38 | PUT | `/todos/sections/{section_id}` | 🔒 | todos |
+| 39 | POST | `/todos/tasks` | 🔒 | todos |
+| 40 | PUT | `/todos/tasks/{task_id}` | 🔒 | todos |
+| 41 | DELETE | `/todos/tasks/{task_id}` | 🔒 | todos |
+| 42 | GET | `/notifications` | 🔒 | notifications |
+| 43 | GET | `/notifications/unread-count` | 🔒 | notifications |
+| 44 | PATCH | `/notifications/{id}/read` | 🔒 | notifications |
+| 45 | POST | `/notifications/read-all` | 🔒 | notifications |
+| 46 | POST | `/notifications/trigger-magic` | 🔒 | notifications |
+| 47 | POST | `/notifications` | 🔒 | notifications |
 
 ---
 
@@ -1101,7 +1114,7 @@ backend/
 ├── facts.py            # Роутер /profile: AI-память студента (UserFacts)
 ├── todos.py            # Роутер /todos: таск-менеджер (Project/Section/Task)
 ├── notifications.py    # Роутер /notifications: in-app уведомления (лента, бейдж, read-all, trigger-magic)
-├── wishes.py           # generate_morning_wish / generate_evening_wish, погода Новосибирска, планировщик 08:00 и 22:30
+├── wishes.py           # generate_morning_wish / generate_evening_wish; планировщик сверяет минуту Новосибирска с wake_time и sleep_time
 └── static/memes/       # Картинки для Notification.image_url (котики, meme_2, meme_3, meme_5, …)
 ```
 

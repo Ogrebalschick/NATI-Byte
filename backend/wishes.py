@@ -1,9 +1,10 @@
 """
 Smart wishes for BYTE students.
 
-Morning cards (push_slot="morning", category="wishes") are generated at 08:00
-Asia/Novosibirsk. Evening cards (push_slot="evening", category="reminders")
-are generated at 22:30. Both land in the Notification feed.
+Morning cards (push_slot="morning", category="wishes") fire at the student's
+`wake_time`. Evening cards (push_slot="evening", category="reminders") fire at
+`sleep_time`. Both clocks are "HH:MM" in Novosibirsk (UTC+7). Defaults are
+08:00 and 22:30. Cards land in the Notification feed.
 
 The in-process scheduler starts with the FastAPI app. It does not send an OS
 push by itself: the mobile client reads the new row from GET /notifications.
@@ -285,9 +286,11 @@ def generate_morning_wish(user_id: int) -> dict:
     """
     Build one morning card for *user_id* and store it as category="wishes".
 
-    GigaChat picks a single variation (cute wish, day prediction, or a joke
-    unofficial holiday) using UserFact memory. When Novosibirsk expects rain,
-    the body includes the umbrella sentence. push_slot is "morning".
+    The scheduler calls this when Novosibirsk HH:MM equals the student's
+    `wake_time`. `POST /notifications/trigger-magic` calls it immediately.
+    GigaChat picks one variation (cute wish, day prediction, or a joke holiday)
+    from UserFact memory. Rain in Novosibirsk adds the umbrella sentence.
+    push_slot is "morning".
     """
     db = SessionLocal()
     try:
@@ -358,9 +361,10 @@ def generate_evening_wish(user_id: int) -> dict:
     """
     Build one bedtime card for *user_id* and store it as category="reminders".
 
-    If every task dated today (due_date or schedule_date, Novosibirsk day) is
-    completed, the card praises the student. Otherwise it supports them and may
-    suggest a book or calm music. push_slot is "evening".
+    The scheduler calls this when Novosibirsk HH:MM equals the student's
+    `sleep_time`. `POST /notifications/trigger-magic` calls it immediately.
+    If every task dated today (due_date or schedule_date) is completed, the
+    card praises the student. Otherwise it supports them. push_slot is "evening".
     """
     db = SessionLocal()
     try:
@@ -456,48 +460,62 @@ def _already_sent_today(user_id: int, push_slot: str) -> bool:
         db.close()
 
 
-def dispatch_magic_slot(push_slot: str) -> None:
-    """Generate the given slot for every user who does not yet have one today."""
+def _hhmm(value: str | None, fallback: tuple[int, int]) -> tuple[int, int]:
+    raw = (value or "").strip()
+    if len(raw) == 5 and raw[2] == ":":
+        hour_text, minute_text = raw.split(":", 1)
+        if hour_text.isdigit() and minute_text.isdigit():
+            hour, minute = int(hour_text), int(minute_text)
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return hour, minute
+    return fallback
+
+
+def dispatch_personal_wishes(moment: datetime | None = None) -> None:
+    """
+    Fire a morning or evening card for each student whose personal clock
+    matches the current Novosibirsk minute. A slot already written today is skipped.
+    """
     global _dispatch_busy
     with _dispatch_lock:
         if _dispatch_busy:
             return
         _dispatch_busy = True
     try:
+        local = moment.astimezone(NOVOSIBIRSK) if moment else _now_local()
         db = SessionLocal()
         try:
-            user_ids = [row[0] for row in db.query(User.id).all()]
+            rows = db.query(User.id, User.wake_time, User.sleep_time).all()
         finally:
             db.close()
-        generator = generate_morning_wish if push_slot == "morning" else generate_evening_wish
-        for user_id in user_ids:
-            if _already_sent_today(user_id, push_slot):
-                continue
-            try:
-                generator(user_id)
-            except Exception as exc:
-                print(f"[WISHES] {push_slot} failed for user {user_id}: {exc}")
+        for user_id, wake_time, sleep_time in rows:
+            slots: list[str] = []
+            wake_hour, wake_minute = _hhmm(wake_time, (8, 0))
+            sleep_hour, sleep_minute = _hhmm(sleep_time, (22, 30))
+            if local.hour == wake_hour and local.minute == wake_minute:
+                slots.append("morning")
+            if local.hour == sleep_hour and local.minute == sleep_minute:
+                slots.append("evening")
+            for slot in slots:
+                if _already_sent_today(user_id, slot):
+                    continue
+                try:
+                    if slot == "morning":
+                        generate_morning_wish(user_id)
+                    else:
+                        generate_evening_wish(user_id)
+                except Exception as exc:
+                    print(f"[WISHES] {slot} failed for user {user_id}: {exc}")
     finally:
         with _dispatch_lock:
             _dispatch_busy = False
 
 
-def _due_slot(moment: datetime | None = None) -> str | None:
-    local = moment.astimezone(NOVOSIBIRSK) if moment else _now_local()
-    if local.hour == 8 and local.minute < 2:
-        return "morning"
-    if local.hour == 22 and 30 <= local.minute < 32:
-        return "evening"
-    return None
-
-
 async def _scheduler_loop() -> None:
-    print("[WISHES] scheduler started: 08:00 morning, 22:30 evening (Novosibirsk)")
+    print("[WISHES] scheduler started: personal wake_time / sleep_time (Novosibirsk)")
     while True:
         try:
-            slot = _due_slot()
-            if slot:
-                await asyncio.to_thread(dispatch_magic_slot, slot)
+            await asyncio.to_thread(dispatch_personal_wishes)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

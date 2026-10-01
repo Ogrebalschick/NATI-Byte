@@ -23,6 +23,9 @@ class User(Base):
     full_name = Column(String, nullable=True)
     student_group = Column(String, nullable=True)
     is_synced_with_nstu = Column(Boolean, default=False)
+    # Personal biorhythm clock, Novosibirsk local time, "HH:MM".
+    wake_time = Column(String, nullable=False, default="08:00")
+    sleep_time = Column(String, nullable=False, default="22:30")
     # cascade="all, delete-orphan" ensures related rows are deleted with the user
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
     student_data = relationship("StudentData", back_populates="user", cascade="all, delete-orphan")
@@ -244,6 +247,8 @@ def _run_migrations() -> None:
             "full_name": "ALTER TABLE users ADD COLUMN full_name VARCHAR",
             "student_group": "ALTER TABLE users ADD COLUMN student_group VARCHAR",
             "is_synced_with_nstu": "ALTER TABLE users ADD COLUMN is_synced_with_nstu BOOLEAN DEFAULT 0",
+            "wake_time": "ALTER TABLE users ADD COLUMN wake_time VARCHAR DEFAULT '08:00'",
+            "sleep_time": "ALTER TABLE users ADD COLUMN sleep_time VARCHAR DEFAULT '22:30'",
         }
         for col_name, ddl in patches.items():
             if col_name not in user_cols:
