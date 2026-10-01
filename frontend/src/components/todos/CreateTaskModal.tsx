@@ -394,106 +394,104 @@ export function CreateTaskModal({
             numberOfLines={3}
           />
 
-          {/* ── Project selector ───────────────────────────────────────── */}
-          {!isEditMode && (
-            <>
-              <Text style={styles.sectionLabel}>Проект</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {/* Inbox chip */}
-                <TouchableOpacity
-                  onPress={() => { setSelectedProjectId(null); setSelectedSectionId(null); setNewProjectName(''); }}
-                  style={[styles.chip, selectedProjectId === null && styles.chipActive]}
-                >
-                  <Ionicons name="archive-outline" size={12} color={selectedProjectId === null ? '#fff' : TEXT2} style={{ marginRight: 4 }} />
-                  <Text style={[styles.chipText, selectedProjectId === null && styles.chipTextActive]}>Входящие</Text>
-                </TouchableOpacity>
+          {/* ── Project selector (режим создания И редактирования) ──── */}
+          <>
+            <Text style={styles.sectionLabel}>Проект</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {/* Inbox chip */}
+              <TouchableOpacity
+                onPress={() => { setSelectedProjectId(null); setSelectedSectionId(null); setNewProjectName(''); }}
+                style={[styles.chip, selectedProjectId === null && styles.chipActive]}
+              >
+                <Ionicons name="archive-outline" size={12} color={selectedProjectId === null ? '#fff' : TEXT2} style={{ marginRight: 4 }} />
+                <Text style={[styles.chipText, selectedProjectId === null && styles.chipTextActive]}>Входящие</Text>
+              </TouchableOpacity>
 
-                {/* Existing projects */}
-                {projects.map(p => {
-                  const pid = Number(p.id);
-                  const isSelected = selectedProjectId === pid;
-                  return (
-                    <TouchableOpacity
-                      key={p.id}
-                      onPress={() => { setSelectedProjectId(pid); setSelectedSectionId(null); setNewProjectName(''); }}
-                      style={[styles.chip, isSelected && styles.chipActive]}
-                    >
-                      <View style={[styles.chipDot, { backgroundColor: p.color }]} />
-                      <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{p.name}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+              {/* Existing projects (skip virtual "all_tasks") */}
+              {projects.filter(p => p.id !== 'all_tasks').map(p => {
+                const pid = Number(p.id);
+                const isSelected = selectedProjectId === pid;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    onPress={() => { setSelectedProjectId(pid); setSelectedSectionId(null); setNewProjectName(''); }}
+                    style={[styles.chip, isSelected && styles.chipActive]}
+                  >
+                    <View style={[styles.chipDot, { backgroundColor: p.color }]} />
+                    <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{p.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
 
-                {/* "New project" chip */}
-                <TouchableOpacity
-                  onPress={() => { setSelectedProjectId('new'); setSelectedSectionId(null); }}
-                  style={[styles.chip, styles.chipNew, selectedProjectId === 'new' && styles.chipNewActive]}
-                >
-                  <Ionicons name="add" size={14} color={selectedProjectId === 'new' ? '#0A84FF' : TEXT2} />
-                  <Text style={[styles.chipText, selectedProjectId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
-                </TouchableOpacity>
-              </ScrollView>
+              {/* "New project" chip */}
+              <TouchableOpacity
+                onPress={() => { setSelectedProjectId('new'); setSelectedSectionId(null); }}
+                style={[styles.chip, styles.chipNew, selectedProjectId === 'new' && styles.chipNewActive]}
+              >
+                <Ionicons name="add" size={14} color={selectedProjectId === 'new' ? '#0A84FF' : TEXT2} />
+                <Text style={[styles.chipText, selectedProjectId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
+              </TouchableOpacity>
+            </ScrollView>
 
-              {/* New project name input */}
-              {selectedProjectId === 'new' && (
-                <TextInput
-                  style={[styles.input, { marginTop: 6 }]}
-                  placeholder="Название нового проекта..."
-                  placeholderTextColor={MUTED}
-                  value={newProjectName}
-                  onChangeText={setNewProjectName}
-                  autoFocus
-                />
-              )}
+            {/* New project name input */}
+            {selectedProjectId === 'new' && (
+              <TextInput
+                style={[styles.input, { marginTop: 6 }]}
+                placeholder="Название нового проекта..."
+                placeholderTextColor={MUTED}
+                value={newProjectName}
+                onChangeText={setNewProjectName}
+                autoFocus={!isEditMode}
+              />
+            )}
 
-              {/* ── Section selector ────────────────────────────────────── */}
-              {(selectedProject || selectedProjectId === 'new') && (
-                <>
-                  <Text style={styles.sectionLabel}>Раздел</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                    <TouchableOpacity
-                      onPress={() => { setSelectedSectionId(null); setNewSectionName(''); }}
-                      style={[styles.chip, selectedSectionId === null && styles.chipActive]}
-                    >
-                      <Text style={[styles.chipText, selectedSectionId === null && styles.chipTextActive]}>Без раздела</Text>
-                    </TouchableOpacity>
+            {/* ── Section selector ────────────────────────────────────── */}
+            {(selectedProject || selectedProjectId === 'new') && (
+              <>
+                <Text style={styles.sectionLabel}>Раздел</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                  <TouchableOpacity
+                    onPress={() => { setSelectedSectionId(null); setNewSectionName(''); }}
+                    style={[styles.chip, selectedSectionId === null && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, selectedSectionId === null && styles.chipTextActive]}>Без раздела</Text>
+                  </TouchableOpacity>
 
-                    {(selectedProject?.sections ?? []).map(s => {
-                      const sid = Number(s.id);
-                      const isSelected = selectedSectionId === sid;
-                      return (
-                        <TouchableOpacity
-                          key={s.id}
-                          onPress={() => { setSelectedSectionId(sid); setNewSectionName(''); }}
-                          style={[styles.chip, isSelected && styles.chipActive]}
-                        >
-                          <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{s.name}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                  {(selectedProject?.sections ?? []).map(s => {
+                    const sid = Number(s.id);
+                    const isSelected = selectedSectionId === sid;
+                    return (
+                      <TouchableOpacity
+                        key={s.id}
+                        onPress={() => { setSelectedSectionId(sid); setNewSectionName(''); }}
+                        style={[styles.chip, isSelected && styles.chipActive]}
+                      >
+                        <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{s.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
 
-                    <TouchableOpacity
-                      onPress={() => setSelectedSectionId('new')}
-                      style={[styles.chip, styles.chipNew, selectedSectionId === 'new' && styles.chipNewActive]}
-                    >
-                      <Ionicons name="add" size={14} color={selectedSectionId === 'new' ? '#0A84FF' : TEXT2} />
-                      <Text style={[styles.chipText, selectedSectionId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
-                    </TouchableOpacity>
-                  </ScrollView>
+                  <TouchableOpacity
+                    onPress={() => setSelectedSectionId('new')}
+                    style={[styles.chip, styles.chipNew, selectedSectionId === 'new' && styles.chipNewActive]}
+                  >
+                    <Ionicons name="add" size={14} color={selectedSectionId === 'new' ? '#0A84FF' : TEXT2} />
+                    <Text style={[styles.chipText, selectedSectionId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
+                  </TouchableOpacity>
+                </ScrollView>
 
-                  {selectedSectionId === 'new' && (
-                    <TextInput
-                      style={[styles.input, { marginTop: 6 }]}
-                      placeholder="Название нового раздела..."
-                      placeholderTextColor={MUTED}
-                      value={newSectionName}
-                      onChangeText={setNewSectionName}
-                    />
-                  )}
-                </>
-              )}
-            </>
-          )}
+                {selectedSectionId === 'new' && (
+                  <TextInput
+                    style={[styles.input, { marginTop: 6 }]}
+                    placeholder="Название нового раздела..."
+                    placeholderTextColor={MUTED}
+                    value={newSectionName}
+                    onChangeText={setNewSectionName}
+                  />
+                )}
+              </>
+            )}
+          </>
 
           {/* ── Priority ───────────────────────────────────────────────── */}
           <Text style={styles.sectionLabel}>Приоритет</Text>

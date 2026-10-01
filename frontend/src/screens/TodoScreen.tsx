@@ -9,11 +9,13 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -27,6 +29,7 @@ import {
   apiCreateSection,
   apiCreateTask,
   apiDeleteTask,
+  apiUpdateSection,
   apiUpdateTask,
   type ApiProject,
   type ApiSection,
@@ -43,6 +46,7 @@ import {
   saveGuestTodos,
   updateTaskInTree,
   type TodoProject,
+  type TodoSection,
   type TodosData,
   type TodoTask,
 } from '../storage/todosStorage';
@@ -313,8 +317,8 @@ const MetricsBlock = React.memo(function MetricsBlock({
   onFilter,
 }: {
   metrics:      MetricsData;
-  activeFilter: MetricFilter | null;
-  onFilter:     (f: MetricFilter | null) => void;
+  activeFilter: MetricFilter;
+  onFilter:     (f: MetricFilter) => void;
 }) {
   const values: Record<MetricFilter, number> = {
     total:       metrics.total,
@@ -331,7 +335,7 @@ const MetricsBlock = React.memo(function MetricsBlock({
           <TouchableOpacity
             key={cfg.key}
             activeOpacity={0.72}
-            onPress={() => onFilter(isActive ? null : cfg.key)}
+            onPress={() => onFilter(cfg.key)}
             style={[metricStyles.card, isActive && { borderColor: cfg.accent }]}
           >
             {/* Иконка в цветном кружке */}
@@ -413,10 +417,19 @@ export default function TodoScreen() {
   const [modalVisible, setModalVisible]     = useState(false);
   const [editingTask, setEditingTask]       = useState<TodoTask | null>(null);
   const [viewMode, setViewMode]             = useState<ViewMode>('list');
-  const [metricFilter, setMetricFilter]     = useState<MetricFilter | null>(null);
+  /** «Всего дел» активна по умолчанию; при смене проекта — возврат к ней. */
+  const [metricFilter, setMetricFilter]     = useState<MetricFilter>('total');
 
-  // Сброс фильтра метрик при смене выбранного проекта
-  useEffect(() => { setMetricFilter(null); }, [selectedProjectId]);
+  // Возврат к «Всего дел» при смене проекта
+  useEffect(() => { setMetricFilter('total'); }, [selectedProjectId]);
+
+  // ── Section management state ──────────────────────────────────────────────
+  const [managingSection, setManagingSection] = useState<{
+    section: TodoSection;
+    project: TodoProject;
+  } | null>(null);
+  const [sectionNewName,  setSectionNewName]  = useState('');
+  const [mergeTargetId,   setMergeTargetId]   = useState<string | null>(null);
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
@@ -464,13 +477,14 @@ export default function TodoScreen() {
       for (const project of guest.projects) {
         try {
           const sp = await apiCreateProject(tok, project.name, project.color);
+          const spId = Number(sp.id);
           for (const section of project.sections) {
             try {
-              const ss = await apiCreateSection(tok, sp.id, section.name, section.position);
+              const ss = await apiCreateSection(tok, spId, section.name, section.position);
               for (const task of section.tasks) {
                 await apiCreateTask(tok, {
                   title: task.title, description: task.description,
-                  project_id: sp.id, section_id: ss.id,
+                  project_id: spId, section_id: ss.id,
                   due_date: task.due_date, schedule_date: task.schedule_date,
                   duration_minutes: task.duration_minutes,
                   priority: task.priority,
@@ -480,7 +494,7 @@ export default function TodoScreen() {
           }
           for (const task of project.inbox_tasks) {
             await apiCreateTask(tok, {
-              title: task.title, description: task.description, project_id: sp.id,
+              title: task.title, description: task.description, project_id: spId,
               due_date: task.due_date, schedule_date: task.schedule_date,
               duration_minutes: task.duration_minutes,
               priority: task.priority,
@@ -636,6 +650,31 @@ export default function TodoScreen() {
 
     if (token && !isGuestId(editingTask.id)) {
       try {
+        // ── Resolve project_id ───────────────────────────────────────────────
+        // • string → создать новый проект, получить int ID
+        // • number → использовать напрямую
+        // • null   → не меняем (бэкенд не поддерживает перемещение в Inbox через PUT)
+        let resolvedProjectId: number | undefined;
+        if (typeof payload.project_id === 'string') {
+          const newProj = await apiCreateProject(token, payload.project_id, '#6366f1');
+          resolvedProjectId = Number(newProj.id);
+        } else if (typeof payload.project_id === 'number') {
+          resolvedProjectId = payload.project_id;
+        }
+
+        // ── Resolve section_id ───────────────────────────────────────────────
+        let resolvedSectionId: number | undefined;
+        if (typeof payload.section_id === 'string') {
+          const projIdForSection = resolvedProjectId
+            ?? (editingTask.project_id ? Number(editingTask.project_id) : null);
+          if (projIdForSection) {
+            const newSec = await apiCreateSection(token, projIdForSection, payload.section_id);
+            resolvedSectionId = newSec.id;
+          }
+        } else if (typeof payload.section_id === 'number') {
+          resolvedSectionId = payload.section_id;
+        }
+
         const updated = await apiUpdateTask(token, taskId, {
           title:            payload.title,
           description:      payload.description,
@@ -643,13 +682,21 @@ export default function TodoScreen() {
           schedule_date:    payload.schedule_date,
           duration_minutes: payload.duration_minutes,
           priority:         payload.priority,
+          ...(resolvedProjectId !== undefined && { project_id: resolvedProjectId }),
+          ...(resolvedSectionId !== undefined && { section_id: resolvedSectionId }),
         });
-        setData(prev => updateTaskInTree(prev, fromApiTask(updated)));
+
+        // Перезагружаем всё дерево, если задача переместилась в другой проект/раздел
+        if (resolvedProjectId !== undefined || resolvedSectionId !== undefined) {
+          await loadFromServer(token);
+        } else {
+          setData(prev => updateTaskInTree(prev, fromApiTask(updated)));
+        }
       } catch (e) {
         if (!isSessionExpired(e)) Alert.alert('Ошибка', 'Не удалось сохранить задачу');
       }
     } else {
-      // Guest edit: update in local state
+      // Guest edit: обновляем поля задачи на месте (перемещение между проектами не поддерживается)
       const now = new Date().toISOString();
       const updated: TodoTask = {
         ...editingTask,
@@ -669,7 +716,7 @@ export default function TodoScreen() {
     }
 
     setEditingTask(null);
-  }, [editingTask, token]);
+  }, [editingTask, token, loadFromServer]);
 
   const handleCompleteTask = useCallback((task: TodoTask) => {
     if (completingIds.has(task.id)) return;
@@ -711,6 +758,43 @@ export default function TodoScreen() {
       },
     ]);
   }, [token]);
+
+  // ── Section management ─────────────────────────────────────────────────────
+
+  const handleOpenSectionManager = useCallback((section: TodoSection, project: TodoProject) => {
+    setSectionNewName(section.name);
+    setMergeTargetId(null);
+    setManagingSection({ section, project });
+  }, []);
+
+  const handleSectionSave = useCallback(async () => {
+    if (!managingSection || !token) return;
+    const { section } = managingSection;
+    setManagingSection(null);
+
+    try {
+      const payload: Parameters<typeof apiUpdateSection>[2] = {};
+
+      // Добавляем name только если оно изменилось
+      const trimmedName = sectionNewName.trim();
+      if (trimmedName && trimmedName !== section.name) {
+        payload.name = trimmedName;
+      }
+
+      if (mergeTargetId) {
+        payload.merge_into_section_id = Number(mergeTargetId);
+      }
+
+      // Нет изменений → ничего не делаем
+      if (!payload.name && !payload.merge_into_section_id) return;
+
+      await apiUpdateSection(token, Number(section.id), payload);
+      // Перезагружаем дерево, т.к. структура разделов изменилась
+      await loadFromServer(token);
+    } catch (e) {
+      if (!isSessionExpired(e)) Alert.alert('Ошибка', 'Не удалось обновить раздел');
+    }
+  }, [managingSection, sectionNewName, mergeTargetId, token, loadFromServer]);
 
   // ── Derived data ───────────────────────────────────────────────────────────
 
@@ -897,7 +981,11 @@ export default function TodoScreen() {
           <MetricsBlock
             metrics={metrics}
             activeFilter={metricFilter}
-            onFilter={setMetricFilter}
+            onFilter={(f) => setMetricFilter(
+              // Повторный тап на не-total карточке → снять фильтр (вернуть к 'total')
+              // Повторный тап на 'total' или любой другой тап → установить
+              f === metricFilter && f !== 'total' ? 'total' : f,
+            )}
           />
 
           {/* Project chips */}
@@ -923,8 +1011,8 @@ export default function TodoScreen() {
             ))}
           </ScrollView>
 
-          {/* Индикатор активного фильтра */}
-          {metricFilter !== null && (
+          {/* Индикатор активного фильтра (не показывается для «Всего дел») */}
+          {metricFilter !== 'total' && (
             <View style={styles.filterBar}>
               <Ionicons name="funnel-outline" size={12} color={TEXT2} />
               <Text style={styles.filterBarText}>
@@ -932,7 +1020,7 @@ export default function TodoScreen() {
                 {' '}· {filteredScopedTasks.length} задач
               </Text>
               <TouchableOpacity
-                onPress={() => setMetricFilter(null)}
+                onPress={() => setMetricFilter('total')}
                 hitSlop={8}
                 style={styles.filterBarClose}
               >
@@ -948,10 +1036,10 @@ export default function TodoScreen() {
             showsVerticalScrollIndicator={false}
           >
             {/*
-             * Когда фильтр метрики активен → показываем плоский отфильтрованный список.
-             * Когда нет → обычная структура с проектами и разделами.
+             * «В работе» / «На сегодня» / «Выполнено» → плоский отфильтрованный список.
+             * «Всего дел» (default) → обычная структура проекта с разделами.
              */}
-            {metricFilter !== null ? (
+            {metricFilter !== 'total' ? (
               filteredScopedTasks.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="search-outline" size={48} color={MUTED} />
@@ -993,10 +1081,24 @@ export default function TodoScreen() {
 
                 {currentProject.sections.map(section => (
                   <View key={section.id} style={styles.sectionBlock}>
-                    <View style={styles.sectionHeader}>
+                    {/* Кликабельный заголовок → открывает SectionManageModal */}
+                    <TouchableOpacity
+                      style={styles.sectionHeader}
+                      onPress={() => handleOpenSectionManager(section, currentProject!)}
+                      activeOpacity={0.7}
+                      disabled={!token}
+                    >
                       <View style={[styles.sectionDot, { backgroundColor: currentProject.color }]} />
                       <Text style={styles.sectionName}>{section.name.toUpperCase()}</Text>
-                    </View>
+                      {!!token && (
+                        <Ionicons
+                          name="ellipsis-horizontal"
+                          size={14}
+                          color={MUTED}
+                          style={{ marginLeft: 'auto' }}
+                        />
+                      )}
+                    </TouchableOpacity>
                     {renderTaskList(section.tasks, 'В этом разделе нет активных задач')}
                   </View>
                 ))}
@@ -1028,6 +1130,89 @@ export default function TodoScreen() {
         onClose={() => { setModalVisible(false); setEditingTask(null); }}
         onSubmit={editingTask ? handleEditTask : handleCreateTask}
       />
+
+      {/* ── Section Manage Modal ──────────────────────────────────────────── */}
+      {managingSection && (
+        <Modal
+          visible
+          transparent
+          animationType="slide"
+          onRequestClose={() => setManagingSection(null)}
+        >
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setManagingSection(null)}
+          />
+          <View style={styles.smSheet}>
+            {/* Handle */}
+            <View style={styles.smHandle} />
+            <Text style={styles.smTitle}>Управление разделом</Text>
+
+            {/* ── Rename field ─────────────────────────────────────── */}
+            <Text style={styles.smLabel}>Название раздела</Text>
+            <TextInput
+              style={styles.smInput}
+              value={sectionNewName}
+              onChangeText={setSectionNewName}
+              placeholder="Название..."
+              placeholderTextColor={MUTED}
+              autoFocus
+            />
+
+            {/* ── Merge target ─────────────────────────────────────── */}
+            {managingSection.project.sections.filter(s => s.id !== managingSection.section.id).length > 0 && (
+              <>
+                <Text style={styles.smLabel}>Переместить все задачи в раздел</Text>
+                {managingSection.project.sections
+                  .filter(s => s.id !== managingSection.section.id)
+                  .map(s => {
+                    const isTarget = mergeTargetId === s.id;
+                    return (
+                      <TouchableOpacity
+                        key={s.id}
+                        style={[styles.smMergeRow, isTarget && styles.smMergeRowActive]}
+                        onPress={() => setMergeTargetId(isTarget ? null : s.id)}
+                        activeOpacity={0.75}
+                      >
+                        <View style={[styles.sectionDot, { backgroundColor: managingSection.project.color, marginRight: 0 }]} />
+                        <Text style={[styles.smMergeText, isTarget && { color: '#0A84FF' }]}>
+                          {s.name}
+                        </Text>
+                        {isTarget && (
+                          <Ionicons name="checkmark-circle" size={18} color="#0A84FF" style={{ marginLeft: 'auto' }} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                {mergeTargetId && (
+                  <Text style={styles.smMergeHint}>
+                    Задачи из «{managingSection.section.name}» переедут в выбранный раздел.
+                    Исходный раздел будет удалён.
+                  </Text>
+                )}
+              </>
+            )}
+
+            {/* ── Actions ──────────────────────────────────────────── */}
+            <TouchableOpacity
+              style={styles.smSubmitBtn}
+              onPress={handleSectionSave}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.smSubmitText}>
+                {mergeTargetId ? 'Переместить и сохранить' : 'Сохранить название'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.smCancelBtn}
+              onPress={() => setManagingSection(null)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.smCancelText}>Отмена</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -1108,6 +1293,95 @@ const styles = StyleSheet.create({
   },
   filterBarText: { fontSize: 12, color: TEXT2, flex: 1, fontWeight: '500' },
   filterBarClose: { padding: 2 },
+
+  // ── Section Manage Modal ──────────────────────────────────────────────────
+  backdrop: {
+    flex:            1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  smSheet: {
+    backgroundColor: CARD,
+    borderTopLeftRadius:  20,
+    borderTopRightRadius: 20,
+    paddingHorizontal:    20,
+    paddingBottom:        40,
+    paddingTop:           12,
+  },
+  smHandle: {
+    width:           40,
+    height:          4,
+    borderRadius:    2,
+    backgroundColor: MUTED,
+    alignSelf:       'center',
+    marginBottom:    16,
+  },
+  smTitle: {
+    fontSize:    17,
+    fontWeight:  '600',
+    color:       TEXT,
+    marginBottom: 20,
+    textAlign:   'center',
+  },
+  smLabel: {
+    fontSize:     12,
+    color:        TEXT2,
+    marginBottom:  6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  smInput: {
+    backgroundColor: BG,
+    borderRadius:    10,
+    paddingHorizontal: 12,
+    paddingVertical:   10,
+    fontSize:          15,
+    color:             TEXT,
+    marginBottom:      20,
+  },
+  smMergeRow: {
+    flexDirection:    'row',
+    alignItems:       'center',
+    gap:              8,
+    paddingVertical:  10,
+    paddingHorizontal: 12,
+    borderRadius:      10,
+    marginBottom:      4,
+  },
+  smMergeRowActive: {
+    backgroundColor: 'rgba(10,132,255,0.1)',
+  },
+  smMergeText: {
+    fontSize: 15,
+    color:    TEXT,
+  },
+  smMergeHint: {
+    fontSize:     12,
+    color:        TEXT2,
+    marginTop:     4,
+    marginBottom: 14,
+    paddingHorizontal: 4,
+  },
+  smSubmitBtn: {
+    backgroundColor: '#0A84FF',
+    borderRadius:    12,
+    paddingVertical: 14,
+    alignItems:      'center',
+    marginTop:       8,
+    marginBottom:    8,
+  },
+  smSubmitText: {
+    color:      '#fff',
+    fontWeight: '600',
+    fontSize:   16,
+  },
+  smCancelBtn: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  smCancelText: {
+    color:    TEXT2,
+    fontSize: 15,
+  },
 
   // ── Project chips ─────────────────────────────────────────────────────────
   chipsScroll: { flexGrow: 0, marginTop: 10 },

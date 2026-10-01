@@ -27,7 +27,8 @@ export interface ApiSection {
 }
 
 export interface ApiProject {
-  id: number;
+  /** int для реальных проектов; "all_tasks" для виртуального проекта «Все задачи» */
+  id: number | string;
   user_id: number;
   name: string;
   color: string;
@@ -66,6 +67,16 @@ export interface TaskUpdatePayload {
   duration_minutes?: number | null;
   priority?: number;
   is_completed?: boolean;
+}
+
+export interface SectionUpdatePayload {
+  /** Новое имя раздела (для переименования). */
+  name?: string;
+  /**
+   * ID раздела-получателя для слияния.
+   * Все задачи из текущего раздела переносятся туда, исходный раздел удаляется.
+   */
+  merge_into_section_id?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -145,4 +156,27 @@ export async function apiUpdateTask(
 export async function apiDeleteTask(token: string, taskId: number): Promise<void> {
   const res = await apiFetch(`/todos/tasks/${taskId}`, { method: 'DELETE' }, token);
   if (!res.ok) throw new Error(await readError(res, 'Не удалось удалить задачу'));
+}
+
+/**
+ * PUT /todos/sections/{sectionId}
+ *
+ * Два режима:
+ *   • Переименование: передай { name }.
+ *   • Слияние:        передай { merge_into_section_id } (+ опционально name для переименования цели).
+ *
+ * Возвращает итоговое состояние раздела (переименованного или целевого после слияния).
+ */
+export async function apiUpdateSection(
+  token: string,
+  sectionId: number,
+  payload: SectionUpdatePayload,
+): Promise<ApiSection> {
+  const res = await apiFetch(`/todos/sections/${sectionId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }, token);
+  if (!res.ok) throw new Error(await readError(res, 'Не удалось обновить раздел'));
+  return res.json();
 }
