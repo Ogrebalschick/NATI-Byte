@@ -67,6 +67,7 @@ frontend/src/
 │   ├── ScreenWrapper.tsx         # SafeAreaView-обёртка для всех экранов
 │   ├── DevServerModal.tsx        # Dev-инструмент: смена URL бэкенда в рантайме
 │   ├── SyncStatusBanner.tsx      # Анимированный баннер статуса синхронизации с НГТУ
+│   ├── StatusIndicator.tsx       # Глобальный бейдж: «Офлайн режим» / «Гостевой режим» (top-right)
 │   ├── NstuImportModal.tsx       # WebView-модал для импорта из ЛК НГТУ (ciu.nstu.ru)
 │   ├── byte/
 │   │   ├── input.tsx             # Поле ввода сообщения в чате
@@ -185,6 +186,7 @@ frontend/src/
 | `SyncStatusBanner` | Абсолютно позиционированный анимированный баннер вверху экрана. Показывает состояние синхронизации с ЛК НГТУ: «Синхронизация...» / «Данные обновлены!» / «Сессия устарела» |
 | `NstuImportModal` | WebView-модал, открывающий `ciu.nstu.ru`. После логина автоматически обходит страницы ЛК (AUTO_SYNC_STEPS), извлекает текст и отправляет на `POST /sync/parse-cabinet` |
 | `DevServerModal` | Dev-инструмент (вызывается долгим тапом по вкладке «Чат»): позволяет сменить IP-адрес бэкенда без пересборки |
+| `StatusIndicator` | Глобальный бейдж состояния в правом верхнем углу (`position: absolute, right: 16, zIndex: 9999`). Показывает «Офлайн режим» (оранжевый) или «Гостевой режим» (серый). Использует `useNetInfo()` из `@react-native-community/netinfo` + `useAuth()`. Рендерится в `_layout.tsx` внутри `AppLockGate`. При online + авторизован — `return null` |
 | `AppLockGate` | При холодном старте: читает PIN из AsyncStorage, если есть — показывает `PinLockScreen` поверх всего контента |
 | `AppLockSettingsModal` | Настройка PIN в разделе «Профиль» |
 | `PinPad` | Цифровая клавиатура 3×4 для ввода PIN |

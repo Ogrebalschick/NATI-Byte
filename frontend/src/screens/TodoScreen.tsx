@@ -593,7 +593,7 @@ function CreateTaskModal({
 // ── Main Screen ───────────────────────────────────────────────────────────────
 
 export default function TodoScreen() {
-  const { token, isAuthenticated } = useAuth();
+  const { token } = useAuth();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const prevToken = useRef<string | null>(null);
@@ -872,12 +872,6 @@ export default function TodoScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Список дел</Text>
-        {!isAuthenticated && (
-          <View style={styles.guestBadge}>
-            <Ionicons name="cloud-offline-outline" size={13} color={TEXT2} style={{ marginRight: 4 }} />
-            <Text style={styles.guestBadgeText}>Гостевой режим</Text>
-          </View>
-        )}
       </View>
 
       {/* Project chips */}
@@ -1022,21 +1016,6 @@ const styles = StyleSheet.create({
     color: TEXT,
     letterSpacing: 0.2,
   },
-  guestBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: CARD,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-  guestBadgeText: {
-    fontSize: 11,
-    color: TEXT2,
-  },
-
   // ── Project chips ─────────────────────────────────────────────────────────
   chipsScroll: {
     flexGrow: 0,

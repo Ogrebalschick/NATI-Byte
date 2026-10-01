@@ -12,6 +12,7 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { AppLockGate } from '../components/security/AppLockGate';
 import { AuthProvider } from '../context/AuthContext';
 import { SyncStatusBanner } from '../components/SyncStatusBanner';
+import { StatusIndicator } from '../components/StatusIndicator';
 
 export default function RootLayout() {
   useEffect(() => {
@@ -35,6 +36,7 @@ export default function RootLayout() {
           <Stack.Screen name="auth" />
         </Stack>
         <SyncStatusBanner />
+        <StatusIndicator />
       </AppLockGate>
     </AuthProvider>
   );
