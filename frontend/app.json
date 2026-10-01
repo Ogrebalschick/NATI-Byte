@@ -64,6 +64,14 @@
           "configureAndroidBackup": true,
           "faceIDPermission": "Разрешите $(PRODUCT_NAME) использовать Face ID для входа в приложение."
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "experiments": {

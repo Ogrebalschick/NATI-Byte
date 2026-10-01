@@ -185,3 +185,105 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
+
+
+# ── Task Manager ──────────────────────────────────────────────────────────────
+
+class ProjectCreate(BaseModel):
+    name: str
+    color: str = "#6366f1"
+
+
+class ProjectResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    color: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SectionCreate(BaseModel):
+    project_id: int
+    name: str
+    position: int = 0
+
+
+class SectionResponse(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    position: int
+
+    class Config:
+        from_attributes = True
+
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    project_id: Optional[int] = None
+    section_id: Optional[int] = None
+    due_date: Optional[datetime] = None
+    priority: int = Field(default=4, ge=1, le=4)
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    project_id: Optional[int] = None
+    section_id: Optional[int] = None
+    due_date: Optional[datetime] = None
+    priority: Optional[int] = Field(default=None, ge=1, le=4)
+    is_completed: Optional[bool] = None
+
+
+class TaskResponse(BaseModel):
+    id: int
+    user_id: int
+    project_id: Optional[int] = None
+    section_id: Optional[int] = None
+    title: str
+    description: Optional[str] = ""
+    due_date: Optional[datetime] = None
+    priority: int
+    is_completed: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SectionWithTasksResponse(BaseModel):
+    """Section enriched with its tasks — used inside the data tree."""
+    id: int
+    project_id: int
+    name: str
+    position: int
+    tasks: List[TaskResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectWithDataResponse(BaseModel):
+    """Project enriched with sections+tasks — the full tree node."""
+    id: int
+    user_id: int
+    name: str
+    color: str
+    created_at: datetime
+    sections: List[SectionWithTasksResponse] = []
+    inbox_tasks: List[TaskResponse] = []  # tasks that belong to the project but have no section
+
+    class Config:
+        from_attributes = True
+
+
+class TodosDataResponse(BaseModel):
+    """Full task-manager snapshot for the authenticated user."""
+    projects: List[ProjectWithDataResponse] = []
+    inbox_tasks: List[TaskResponse] = []  # tasks with no project at all

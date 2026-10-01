@@ -11,6 +11,7 @@
     "@react-navigation/native": "^7.3.18",
     "expo": "^57.0.24",
     "expo-android-keyboard-fix": "^2.1.0",
+    "expo-build-properties": "~57.0.22",
     "expo-constants": "~57.0.19",
     "expo-device": "~57.0.2",
     "expo-font": "~57.0.4",
