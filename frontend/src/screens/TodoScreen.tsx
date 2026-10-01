@@ -174,7 +174,11 @@ function fromApiProject(p: ApiProject): TodoProject {
 
 function fromApiData(data: ApiTodosData): TodosData {
   return {
-    projects: data.projects.map(fromApiProject),
+    // Фильтруем виртуальный «all_tasks» — он строится на клиенте через displayedProjects,
+    // чтобы не загрязнять data-стейт дублирующимися задачами и не ломать сохранения.
+    projects: data.projects
+      .filter(p => String(p.id) !== 'all_tasks')
+      .map(fromApiProject),
     inbox_tasks: data.inbox_tasks.map(fromApiTask),
   };
 }
@@ -412,7 +416,8 @@ export default function TodoScreen() {
 
   const [data, setData]                     = useState<TodosData>(emptyTodosData());
   const [isLoading, setIsLoading]           = useState(true);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('inbox');
+  // По умолчанию показываем «Все задачи» — виртуальный проект, агрегирующий всё.
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all_tasks');
   const [completingIds, setCompletingIds]   = useState<Set<string>>(new Set());
   const [modalVisible, setModalVisible]     = useState(false);
   const [editingTask, setEditingTask]       = useState<TodoTask | null>(null);
@@ -768,28 +773,62 @@ export default function TodoScreen() {
   }, []);
 
   const handleSectionSave = useCallback(async () => {
-    if (!managingSection || !token) return;
-    const { section } = managingSection;
+    if (!managingSection) return;
+    const { section, project } = managingSection;
     setManagingSection(null);
 
+    const trimmedName = sectionNewName.trim();
+    const hasRename = !!trimmedName && trimmedName !== section.name;
+    const hasMerge  = !!mergeTargetId;
+
+    // Нет реальных изменений → ничего не делаем
+    if (!hasRename && !hasMerge) return;
+
+    if (!token) {
+      // ── Гостевой путь: обновляем локальный стейт и AsyncStorage ─────────
+      setData(prev => {
+        const updatedProjects = prev.projects.map(p => {
+          if (p.id !== project.id) return p;
+
+          if (hasMerge) {
+            // Слияние: задачи источника переносим в целевой раздел, источник удаляем
+            const sourceTasks = p.sections.find(s => s.id === section.id)?.tasks ?? [];
+            const updatedSections = p.sections
+              .filter(s => s.id !== section.id)          // убираем источник
+              .map(s => s.id === mergeTargetId
+                ? {
+                    ...s,
+                    ...(hasRename ? { name: trimmedName } : {}),
+                    tasks: [...s.tasks, ...sourceTasks],
+                  }
+                : s,
+              );
+            return { ...p, sections: updatedSections };
+          }
+
+          // Только переименование
+          return {
+            ...p,
+            sections: p.sections.map(s =>
+              s.id === section.id ? { ...s, name: trimmedName } : s,
+            ),
+          };
+        });
+
+        const next = { ...prev, projects: updatedProjects };
+        saveGuestTodos(next).catch(() => {});
+        return next;
+      });
+      return;
+    }
+
+    // ── Авторизованный путь: вызываем API ────────────────────────────────
     try {
       const payload: Parameters<typeof apiUpdateSection>[2] = {};
-
-      // Добавляем name только если оно изменилось
-      const trimmedName = sectionNewName.trim();
-      if (trimmedName && trimmedName !== section.name) {
-        payload.name = trimmedName;
-      }
-
-      if (mergeTargetId) {
-        payload.merge_into_section_id = Number(mergeTargetId);
-      }
-
-      // Нет изменений → ничего не делаем
-      if (!payload.name && !payload.merge_into_section_id) return;
+      if (hasRename) payload.name = trimmedName;
+      if (hasMerge)  payload.merge_into_section_id = Number(mergeTargetId);
 
       await apiUpdateSection(token, Number(section.id), payload);
-      // Перезагружаем дерево, т.к. структура разделов изменилась
       await loadFromServer(token);
     } catch (e) {
       if (!isSessionExpired(e)) Alert.alert('Ошибка', 'Не удалось обновить раздел');
@@ -798,11 +837,36 @@ export default function TodoScreen() {
 
   // ── Derived data ───────────────────────────────────────────────────────────
 
+  /**
+   * Список проектов для рендера чипов и поиска currentProject.
+   * Всегда первым идёт виртуальный «Все задачи», который строится из реальных данных.
+   * Сам data.projects никогда не содержит виртуальный проект — это предотвращает
+   * загрязнение гостевых сохранений в AsyncStorage.
+   */
+  const displayedProjects = useMemo<TodoProject[]>(() => {
+    const allTasksFlat: TodoTask[] = [
+      ...data.inbox_tasks,
+      ...data.projects.flatMap(p => [
+        ...p.inbox_tasks,
+        ...p.sections.flatMap(s => s.tasks),
+      ]),
+    ];
+    const virtualAllTasks: TodoProject = {
+      id:         'all_tasks',
+      name:       'Все задачи',
+      color:      '#6366f1',
+      created_at: '',
+      sections:   [],
+      inbox_tasks: allTasksFlat,
+    };
+    return [virtualAllTasks, ...data.projects];
+  }, [data]);
+
   const currentProject = useMemo(
     () => selectedProjectId !== 'inbox'
-      ? data.projects.find(p => p.id === selectedProjectId) ?? null
+      ? displayedProjects.find(p => p.id === selectedProjectId) ?? null
       : null,
-    [selectedProjectId, data.projects],
+    [selectedProjectId, displayedProjects],
   );
 
   const allTasks = useMemo(() => flattenAllTasks(data), [data]);
@@ -811,17 +875,17 @@ export default function TodoScreen() {
 
   /**
    * Плоский список задач в рамках выбранного проекта / inbox.
-   * Пересчитывается при смене проекта или обновлении данных.
+   * Для «all_tasks» — все задачи пользователя.
    */
   const scopedTasks = useMemo<TodoTask[]>(() => {
     if (selectedProjectId === 'inbox') return data.inbox_tasks;
-    const proj = data.projects.find(p => p.id === selectedProjectId);
+    const proj = displayedProjects.find(p => p.id === selectedProjectId);
     if (!proj) return [];
     return [
       ...proj.inbox_tasks,
       ...proj.sections.flatMap(s => s.tasks),
     ];
-  }, [selectedProjectId, data]);
+  }, [selectedProjectId, data.inbox_tasks, displayedProjects]);
 
   /** 4 метрики для дашборда, пересчитываемые при любом изменении данных */
   const metrics = useMemo<MetricsData>(() => {
@@ -871,7 +935,11 @@ export default function TodoScreen() {
     }
   }, [scopedTasks, metricFilter]);
 
-  const defaultModalProjectId = selectedProjectId !== 'inbox' ? selectedProjectId : null;
+  // «all_tasks» — виртуальный, не передаём его в модалку создания/редактирования задачи
+  const defaultModalProjectId =
+    selectedProjectId !== 'inbox' && selectedProjectId !== 'all_tasks'
+      ? selectedProjectId
+      : null;
 
   // ── Render helpers ─────────────────────────────────────────────────────────
 
@@ -1000,7 +1068,7 @@ export default function TodoScreen() {
               selected={selectedProjectId === 'inbox'}
               onPress={() => setSelectedProjectId('inbox')}
             />
-            {data.projects.map(p => (
+            {displayedProjects.map(p => (
               <ProjectChip
                 key={p.id}
                 label={p.name}
@@ -1036,15 +1104,25 @@ export default function TodoScreen() {
             showsVerticalScrollIndicator={false}
           >
             {/*
-             * «В работе» / «На сегодня» / «Выполнено» → плоский отфильтрованный список.
-             * «Всего дел» (default) → обычная структура проекта с разделами.
+             * Плоский вид (отфильтрованный):
+             *   • метрика ≠ «Всего дел»          → фильтруем задачи
+             *   • «Все задачи» + «Всего дел»      → все задачи одним плоским списком
+             *     (виртуальный проект без секций — «БЕЗ РАЗДЕЛА» не нужен)
+             *
+             * Структурный вид (с разделами):
+             *   • «Входящие»            → inbox_tasks
+             *   • конкретный проект     → его секции и project inbox
              */}
-            {metricFilter !== 'total' ? (
+            {metricFilter !== 'total' || selectedProjectId === 'all_tasks' ? (
               filteredScopedTasks.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="search-outline" size={48} color={MUTED} />
                   <Text style={styles.emptyTitle}>Нет задач</Text>
-                  <Text style={styles.emptySubtitle}>По этому фильтру задач не найдено</Text>
+                  <Text style={styles.emptySubtitle}>
+                    {selectedProjectId === 'all_tasks'
+                      ? 'Добавь первую задачу через «+»'
+                      : 'По этому фильтру задач не найдено'}
+                  </Text>
                 </View>
               ) : (
                 renderTaskList(filteredScopedTasks)
@@ -1086,18 +1164,15 @@ export default function TodoScreen() {
                       style={styles.sectionHeader}
                       onPress={() => handleOpenSectionManager(section, currentProject!)}
                       activeOpacity={0.7}
-                      disabled={!token}
                     >
                       <View style={[styles.sectionDot, { backgroundColor: currentProject.color }]} />
                       <Text style={styles.sectionName}>{section.name.toUpperCase()}</Text>
-                      {!!token && (
-                        <Ionicons
-                          name="ellipsis-horizontal"
-                          size={14}
-                          color={MUTED}
-                          style={{ marginLeft: 'auto' }}
-                        />
-                      )}
+                      <Ionicons
+                        name="ellipsis-horizontal"
+                        size={14}
+                        color={MUTED}
+                        style={{ marginLeft: 'auto' }}
+                      />
                     </TouchableOpacity>
                     {renderTaskList(section.tasks, 'В этом разделе нет активных задач')}
                   </View>
