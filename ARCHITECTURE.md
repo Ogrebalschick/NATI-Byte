@@ -40,8 +40,9 @@ frontend/src/
 │   ├── index.tsx                 # ← Точка входа: <Redirect href="/(tabs)/chat" />
 │   ├── auth.tsx                  # ← Алиас: re-export из screens/AuthScreen
 │   └── (tabs)/
-│       ├── _layout.tsx           # ← Bottom Tab Navigator (5 вкладок)
-│       ├── statistics.tsx        # ← Вкладка «Статистика»
+│       ├── _layout.tsx           # ← Bottom Tab Navigator (5 вкладок): Сервисы, Список дел, Чат, Заметки, Профиль
+│       ├── services.tsx          # ← Вкладка «Сервисы» (/services), иконка сетки Ionicons apps-sharp
+│       ├── statistics.tsx        # ← Успеваемость без вкладки (href: null). Открывается из профиля по /statistics
 │       ├── todos.tsx             # ← Вкладка «Список дел»
 │       ├── chat.tsx              # ← Вкладка «Чат» (Byte AI)
 │       ├── notes.tsx             # ← Вкладка «Заметки»
@@ -56,7 +57,8 @@ frontend/src/
 ├── screens/                      # Логика экранов (импортируются через app/)
 │   ├── AuthScreen.tsx            # Авторизация / Регистрация
 │   ├── byte.tsx                  # Чат с ИИ Byte (GigaChat)
-│   ├── StatisticsScreen.tsx      # Статистика / Успеваемость
+│   ├── ServicesScreen.tsx        # Вкладка «Сервисы»
+│   ├── StatisticsScreen.tsx      # Статистика / Успеваемость (не таб, вход из профиля)
 │   ├── NotesScreen.tsx           # Заметки
 │   ├── TodoScreen.tsx            # Список дел (Task Manager)
 │   ├── ProfileScreen.tsx         # Профиль пользователя
@@ -153,7 +155,8 @@ frontend/src/
 |-------|--------------------|--------------------|----------|
 | **Стартовый редирект** | `/` | `app/index.tsx` | Немедленно редиректит на `/(tabs)/chat` |
 | **Чат (Byte AI)** | `/(tabs)/chat` | `screens/byte.tsx` | Главный чат с ИИ. Использует GigaChat через `POST /ask`. Хранит историю локально + синхронизирует через `POST /auth/chats/save` |
-| **Статистика** | `/(tabs)/statistics` | `screens/StatisticsScreen.tsx` | Отображает успеваемость из ЛК НГТУ (progress, control_weeks), GPA, ручные предметы и их баллы. Данные: `GET /sync/student-data` + `GET /subjects` |
+| **Сервисы** | `/(tabs)/services` | `screens/ServicesScreen.tsx` | Вкладка таб-бара вместо статистики. Подпись «Сервисы», иконка сетки из 9 точек (`Ionicons` `apps-sharp` / `apps-outline`) |
+| **Статистика** | `/(tabs)/statistics` | `screens/StatisticsScreen.tsx` | Экран успеваемости без пункта в таб-баре (`href: null`). Открывается из профиля. GPA, контрольные недели, ручные предметы. Данные: `GET /sync/student-data` + `GET /subjects` |
 | **Список дел** | `/(tabs)/todos` | `screens/TodoScreen.tsx` | Todoist-подобный таск-менеджер. Два режима: **Список** (проекты → разделы → задачи) и **Календарь** (Google Calendar-стиль, три вкладки с жестами навигации). В режиме «Список»: дашборд из 4 карточек-метрик (Всего / В работе / На сегодня / Выполнено) с интерактивной фильтрацией. Создание задачи: умный ввод проекта/раздела (строка = создать новый), два DateTimePicker для `due_date` и `schedule_date`, поле `duration_minutes` с пресетами. Данные: `GET /todos/data` |
 | **Заметки** | `/(tabs)/notes` | `screens/NotesScreen.tsx` | Markdown-заметки с AI-категоризацией через GigaChat. Данные: `GET /notes` |
 | **Профиль** | `/(tabs)/profile` | `screens/ProfileScreen.tsx` | Настройки аккаунта, 2FA, смена пароля, импорт из ЛК НГТУ, статус синхронизации. Полугодовой баннер `showReviewBanner` стоит под шапкой (аватар, имя, группа, почта) и над списком разделов. В разделе «БЕЗОПАСНОСТЬ И НАСТРОЙКИ» строка «Режим дня» открывает `DayRhythmModal`: два крупных блока «Время пробуждения» и «Время отхода ко сну». На iOS/Android тап открывает `@react-native-community/datetimepicker` (`mode="time"`, `display="spinner"`, `onValueChange` / `onDismiss`). «Сохранить» шлёт `PATCH /auth/profile/schedule` и обновляет `user.wake_time` / `user.sleep_time` в `AuthContext`. Гость видит ту же кнопку на стене профиля: часы пишутся в `@guest_wake_time` и `@guest_sleep_time`, локальные пуши ставятся на эти часы |

@@ -30,8 +30,8 @@ export default function TabLayout() {
             let iconName: keyof typeof Ionicons.glyphMap = 'help-circle';
 
             switch (route.name) {
-              case 'statistics':
-                iconName = focused ? 'stats-chart' : 'stats-chart-outline';
+              case 'services':
+                iconName = focused ? 'apps-sharp' : 'apps-outline';
                 break;
               case 'todos':
                 iconName = focused ? 'checkbox' : 'checkbox-outline';
@@ -71,7 +71,10 @@ export default function TabLayout() {
           },
         })}
       >
-        <Tabs.Screen name="statistics" options={{ title: 'Статистика' }} />
+        <Tabs.Screen
+          name="services"
+          options={{ title: 'Сервисы', tabBarLabel: 'Сервисы' }}
+        />
         <Tabs.Screen name="todos" options={{ title: 'Список дел' }} />
         <Tabs.Screen
           name="chat"
@@ -96,6 +99,7 @@ export default function TabLayout() {
         />
         <Tabs.Screen name="notes" options={{ title: 'Заметки' }} />
         <Tabs.Screen name="profile" options={{ title: 'Профиль' }} />
+        <Tabs.Screen name="statistics" options={{ href: null }} />
       </Tabs>
       <DevServerModal
         visible={serverModalVisible}
