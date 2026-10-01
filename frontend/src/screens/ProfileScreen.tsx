@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { ScreenWrapper } from '../components/ScreenWrapper';
@@ -488,6 +489,7 @@ const CreatePasswordModal = ({ visible, onClose, onSubmit }: CreatePasswordModal
 
 const AuthenticatedProfile = () => {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     user,
     logout,
@@ -600,7 +602,10 @@ const AuthenticatedProfile = () => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.containerContent}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.containerContent, { paddingTop: insets.top }]}
+    >
       {showReviewBanner && (
         <View style={styles.reviewBanner}>
           <View style={styles.reviewTitleRow}>
@@ -676,19 +681,12 @@ const AuthenticatedProfile = () => {
           <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.menuItem}>
-          <Ionicons name="person-outline" size={24} color="#fff" />
-          <Text style={styles.menuText}>Редактировать профиль</Text>
-          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.menuItem}>
-          <Ionicons name="chatbubbles-outline" size={24} color="#fff" />
-          <Text style={styles.menuText}>Мои чаты</Text>
-          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.menuItem}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => router.push('/statistics')}
+          accessibilityRole="button"
+          accessibilityLabel="Статистика"
+        >
           <Ionicons name="stats-chart-outline" size={24} color="#fff" />
           <Text style={styles.menuText}>Статистика</Text>
           <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
@@ -768,7 +766,7 @@ const AuthenticatedProfile = () => {
 
       {/* Footer */}
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Версия 1.0.0</Text>
+        <Text style={styles.footerText}>BYTE v0.1.0 (Beta)</Text>
       </View>
 
       <NstuImportModal
@@ -872,7 +870,8 @@ const styles = StyleSheet.create({
   containerContent: { paddingHorizontal: 16, paddingBottom: 40 },
   header: {
     alignItems: 'center',
-    paddingVertical: 32,
+    paddingTop: 24,
+    paddingBottom: 32,
     borderBottomWidth: 1,
     borderBottomColor: '#2C2D2E',
     marginBottom: 8,
