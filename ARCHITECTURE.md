@@ -1,0 +1,806 @@
+# BYTE — Архитектурная карта проекта
+
+> **Для ИИ-агентов:** Прочти раздел [4. ИНСТРУКЦИЯ ДЛЯ ИИ-АГЕНТОВ](#4-инструкция-для-ии-агентов) **прежде** чем вносить любые изменения в код.
+
+---
+
+## Содержание
+
+1. [Карта страниц и фронтенда](#1-карта-страниц-и-фронтенда)
+2. [Структура базы данных](#2-структура-базы-данных)
+3. [Карта API и эндпоинтов](#3-карта-api-и-эндпоинтов)
+4. [Инструкция для ИИ-агентов](#4-инструкция-для-ии-агентов)
+
+---
+
+## 1. Карта страниц и фронтенда
+
+### Технологический стек фронтенда
+
+| Слой | Технология |
+|------|-----------|
+| Фреймворк | React Native + Expo SDK 57 |
+| Роутинг | `expo-router` v4 (файловая маршрутизация) |
+| Состояние | React Context (`AuthContext`) |
+| Хранилище на устройстве | AsyncStorage |
+| Иконки | `@expo/vector-icons` (Ionicons) |
+| Стилизация | StyleSheet (нативный RN) |
+| ИИ-чат | GigaChat (через бэкенд) |
+
+---
+
+### 1.1 Дерево файловой структуры `frontend/src`
+
+```
+frontend/src/
+│
+├── app/                          # expo-router файловая маршрутизация
+│   ├── _layout.tsx               # ← Корневой layout (AuthProvider + AppLockGate + SyncStatusBanner)
+│   ├── index.tsx                 # ← Точка входа: <Redirect href="/(tabs)/chat" />
+│   ├── auth.tsx                  # ← Алиас: re-export из screens/AuthScreen
+│   └── (tabs)/
+│       ├── _layout.tsx           # ← Bottom Tab Navigator (5 вкладок)
+│       ├── statistics.tsx        # ← Вкладка «Статистика»
+│       ├── todos.tsx             # ← Вкладка «Список дел»
+│       ├── chat.tsx              # ← Вкладка «Чат» (Byte AI)
+│       ├── notes.tsx             # ← Вкладка «Заметки»
+│       └── profile/
+│           ├── _layout.tsx       # ← Stack для профиля (index + auth + facts + sessions)
+│           ├── index.tsx         # ← Вкладка «Профиль»
+│           ├── auth.tsx          # ← Экран авторизации внутри вкладки профиля
+│           ├── facts.tsx         # ← Экран «Память ИИ»
+│           └── sessions.tsx      # ← Экран «Активные сессии»
+│
+├── screens/                      # Логика экранов (импортируются через app/)
+│   ├── AuthScreen.tsx            # Авторизация / Регистрация
+│   ├── byte.tsx                  # Чат с ИИ Byte (GigaChat)
+│   ├── StatisticsScreen.tsx      # Статистика / Успеваемость
+│   ├── NotesScreen.tsx           # Заметки
+│   ├── TodoScreen.tsx            # Список дел (Task Manager)
+│   ├── ProfileScreen.tsx         # Профиль пользователя
+│   ├── FactsScreen.tsx           # Память ИИ (UserFacts)
+│   ├── SessionsScreen.tsx        # Активные устройства / сессии
+│   ├── PinLockScreen.tsx         # PIN-экран блокировки
+│   └── index.tsx                 # (barrel-экспорт экранов)
+│
+├── components/
+│   ├── ScreenWrapper.tsx         # SafeAreaView-обёртка для всех экранов
+│   ├── DevServerModal.tsx        # Dev-инструмент: смена URL бэкенда в рантайме
+│   ├── SyncStatusBanner.tsx      # Анимированный баннер статуса синхронизации с НГТУ
+│   ├── NstuImportModal.tsx       # WebView-модал для импорта из ЛК НГТУ (ciu.nstu.ru)
+│   ├── byte/
+│   │   ├── input.tsx             # Поле ввода сообщения в чате
+│   │   ├── messages.tsx          # Список сообщений чата
+│   │   ├── history.tsx           # История диалогов
+│   │   ├── helloByte.tsx         # Приветственный экран Byte
+│   │   ├── error.tsx             # Состояние ошибки в чате
+│   │   └── crisis.tsx            # Кризисная интервенция (особые ситуации)
+│   ├── stats/
+│   │   ├── CircularGpa.tsx       # Круговой индикатор GPA
+│   │   ├── CircularPercent.tsx   # Круговой индикатор в %
+│   │   ├── BarProgress.tsx       # Прогресс-бар для баллов по предметам
+│   │   ├── GradeBadge.tsx        # Бейдж оценки (отлично / хорошо / ...)
+│   │   ├── SubjectTrackerModals.tsx  # Модалы добавления/редактирования предметов
+│   │   └── parseStats.ts         # Утилита разбора JSON успеваемости из ЛК
+│   ├── facts/
+│   │   └── FactSwipeDeck.tsx     # Swipe-карточки для просмотра/удаления фактов ИИ
+│   └── security/
+│       ├── AppLockGate.tsx       # Ворота: при холодном старте показывает PIN-экран
+│       ├── AppLockSettingsModal.tsx  # Настройки PIN-блокировки в профиле
+│       └── PinPad.tsx            # Цифровая клавиатура для ввода PIN
+│
+├── context/
+│   └── AuthContext.tsx           # Глобальный контекст: auth, sync, сессия, 2FA
+│
+├── api/
+│   ├── config.ts                 # URL бэкенда, порт, hydrate из AsyncStorage
+│   ├── http.ts                   # apiFetch — обёртка fetch с обработкой 401
+│   ├── todosApi.ts               # CRUD запросы к /todos/*
+│   ├── notesApi.ts               # CRUD запросы к /notes
+│   ├── subjectsApi.ts            # CRUD запросы к /subjects
+│   ├── sessionsApi.ts            # Запросы к /auth/sessions
+│   └── factsApi.ts               # Запросы к /profile/facts
+│
+├── storage/
+│   ├── chatStorage.ts            # AsyncStorage: кэш чатов (per-user)
+│   ├── notesStorage.ts           # AsyncStorage: черновики заметок
+│   ├── todosStorage.ts           # AsyncStorage: оффлайн-кэш задач
+│   ├── subjectsStorage.ts        # AsyncStorage: кэш предметов/баллов
+│   └── appLockStorage.ts         # AsyncStorage: PIN-код блокировки
+│
+├── hooks/
+│   └── useChatSync.ts            # Хук синхронизации истории чатов с сервером
+│
+├── types/
+│   └── subjects.ts               # TypeScript-типы для предметов/баллов
+│
+├── navigation/
+│   ├── AppNavigator.tsx          # (legacy, не используется expo-router)
+│   └── BottomTabNavigator.tsx    # (legacy, не используется expo-router)
+│
+├── security/
+│   └── biometricAuth.ts          # Биометрическая аутентификация (TouchID/FaceID)
+│
+├── deviceName.ts                 # Определяет имя устройства для сессии
+└── api.ts                        # (legacy barrel, используй api/ директорию)
+```
+
+---
+
+### 1.2 Маппинг экранов → файлы
+
+| Экран | Route (expo-router) | Основной файл | Описание |
+|-------|--------------------|--------------------|----------|
+| **Стартовый редирект** | `/` | `app/index.tsx` | Немедленно редиректит на `/(tabs)/chat` |
+| **Чат (Byte AI)** | `/(tabs)/chat` | `screens/byte.tsx` | Главный чат с ИИ. Использует GigaChat через `POST /ask`. Хранит историю локально + синхронизирует через `POST /auth/chats/save` |
+| **Статистика** | `/(tabs)/statistics` | `screens/StatisticsScreen.tsx` | Отображает успеваемость из ЛК НГТУ (progress, control_weeks), GPA, ручные предметы и их баллы. Данные: `GET /sync/student-data` + `GET /subjects` |
+| **Список дел** | `/(tabs)/todos` | `screens/TodoScreen.tsx` | Todoist-подобный таск-менеджер. Проекты → Разделы → Задачи. Данные: `GET /todos/data` |
+| **Заметки** | `/(tabs)/notes` | `screens/NotesScreen.tsx` | Markdown-заметки с AI-категоризацией через GigaChat. Данные: `GET /notes` |
+| **Профиль** | `/(tabs)/profile` | `screens/ProfileScreen.tsx` | Настройки аккаунта, 2FA, смена пароля, импорт из ЛК НГТУ, статус синхронизации |
+| **Авторизация** | `/(tabs)/profile/auth` или `/auth` | `screens/AuthScreen.tsx` | Регистрация (2 шага + код на почту) и вход (с опциональной 2FA). Интегрирован в ProfileScreen для гостевого режима |
+| **Память ИИ** | `/(tabs)/profile/facts` | `screens/FactsScreen.tsx` | Просмотр и удаление фактов, которые ИИ запомнил о студенте. Данные: `GET /profile/facts` |
+| **Активные сессии** | `/(tabs)/profile/sessions` | `screens/SessionsScreen.tsx` | Список всех залогиненных устройств, отзыв сессий. Данные: `GET /auth/sessions` |
+| **PIN-блокировка** | (модал поверх всего) | `screens/PinLockScreen.tsx` | Показывается `AppLockGate` при холодном старте если PIN установлен |
+
+---
+
+### 1.3 Глобальные компоненты и контексты
+
+#### `src/context/AuthContext.tsx` — Центральный контекст приложения
+
+Оборачивает всё дерево в `<AuthProvider>`. Предоставляет:
+
+| Поле / метод | Тип | Назначение |
+|---|---|---|
+| `user` | `User \| null` | Текущий залогиненный пользователь |
+| `token` | `string \| null` | JWT Bearer token |
+| `isLoading` | `boolean` | Инициализация завершена |
+| `isAuthenticated` | `boolean` | `!!user` |
+| `syncStatus` | `SyncStatus` | Статус синхронизации с НГТУ: `idle \| syncing \| error_auth \| success` |
+| `showReviewBanner` | `boolean` | Нужно ли обновить факты (раз в 180 дней) |
+| `login()` | `async` | Вход по email+password; бросает `{type:'requires_verification'}` при 2FA |
+| `verifyLogin()` | `async` | Подтверждение 2FA-кода |
+| `requestRegisterCode()` | `async` | Шаг 1 регистрации |
+| `verifyRegister()` | `async` | Шаг 2 регистрации |
+| `logout()` | `async` | Выход, очистка AsyncStorage |
+| `deleteAccount()` | `async` | Удаление аккаунта |
+| `toggle2FA()` | `async` | Вкл/выкл 2FA |
+| `requestPasswordReset()` | `async` | Отправить код смены пароля |
+| `confirmPasswordReset()` | `async` | Подтвердить смену пароля |
+| `nstuLogin()` | `async` | Вход через НГТУ ID (без пароля BYTE) |
+| `setPassword()` | `async` | Установить BYTE-пароль для НГТУ-аккаунтов |
+| `parseCabinet()` | `async` | Отправить текст страницы ЛК на парсинг |
+| `getStudentData()` | `async` | Получить сохранённые снапшоты ЛК |
+| `markLastSync()` | `async` | Зафиксировать время последней синхронизации |
+| `dismissSyncStatus()` | `sync` | Сбросить статус баннера синхронизации |
+| `confirmProfileReview()` | `async` | Отметить, что студент обновил факты профиля |
+
+---
+
+#### Общие компоненты (`src/components/`)
+
+| Компонент | Назначение |
+|-----------|-----------|
+| `ScreenWrapper` | SafeAreaView-обёртка с `paddingHorizontal: 16`, тёмный фон `#17161B`. Используется на каждом экране |
+| `SyncStatusBanner` | Абсолютно позиционированный анимированный баннер вверху экрана. Показывает состояние синхронизации с ЛК НГТУ: «Синхронизация...» / «Данные обновлены!» / «Сессия устарела» |
+| `NstuImportModal` | WebView-модал, открывающий `ciu.nstu.ru`. После логина автоматически обходит страницы ЛК (AUTO_SYNC_STEPS), извлекает текст и отправляет на `POST /sync/parse-cabinet` |
+| `DevServerModal` | Dev-инструмент (вызывается долгим тапом по вкладке «Чат»): позволяет сменить IP-адрес бэкенда без пересборки |
+| `AppLockGate` | При холодном старте: читает PIN из AsyncStorage, если есть — показывает `PinLockScreen` поверх всего контента |
+| `AppLockSettingsModal` | Настройка PIN в разделе «Профиль» |
+| `PinPad` | Цифровая клавиатура 3×4 для ввода PIN |
+
+---
+
+#### Статистика (`src/components/stats/`)
+
+| Компонент | Назначение |
+|-----------|-----------|
+| `CircularGpa` | SVG-кольцо со значением GPA (от 2 до 5) |
+| `CircularPercent` | SVG-кольцо с процентом (0–100) |
+| `BarProgress` | Горизонтальный прогресс-бар: `current_score / max_score` для ручных предметов |
+| `GradeBadge` | Цветной бейдж текстовой оценки: «отлично» → зелёный, «неудовл» → красный и т.д. |
+| `SubjectTrackerModals` | Модал создания/редактирования ручного предмета и добавления балла |
+| `parseStats.ts` | Утилита: разбирает `StudentData.payload` для экрана статистики (subjects, GPA, контрольные недели) |
+
+---
+
+#### Чат (`src/components/byte/`)
+
+| Компонент | Назначение |
+|-----------|-----------|
+| `messages.tsx` | FlatList рендер сообщений чата (user / assistant / system) |
+| `input.tsx` | TextInput + кнопка отправки, поддержка multiline |
+| `history.tsx` | Боковая панель с историей диалогов |
+| `helloByte.tsx` | Стартовый экран с подсказками для нового чата |
+| `error.tsx` | Отображение ошибки при сбое API |
+| `crisis.tsx` | Специальный блок кризисной поддержки (показывается при тревожных запросах) |
+
+---
+
+## 2. Структура базы данных
+
+**Движок:** SQLite (файл `backend/byte.db`)
+**ORM:** SQLAlchemy (декларативный стиль)
+**URL:** `sqlite:///./byte.db` (из переменной окружения `DATABASE_URL`)
+
+Миграции: лёгкие — функция `_run_migrations()` в `backend/database.py` добавляет недостающие столбцы через `ALTER TABLE`, не удаляя существующие данные.
+
+---
+
+### Диаграмма связей (ERD)
+
+```
+users (1) ──── (N) chats
+users (1) ──── (N) student_data
+users (1) ──── (N) custom_subjects ──── (N) score_logs
+users (1) ──── (N) notes
+users (1) ──── (N) user_facts
+users (1) ──── (N) user_sessions
+users (1) ──── (N) projects ──── (N) sections ──── (N) tasks
+users (1) ──── (N) tasks  [прямая связь, tasks.user_id]
+```
+
+---
+
+### Таблица `users`
+
+Основная таблица аккаунтов.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `email` | String | UNIQUE, index | Только `@stud.nstu.ru` при обычной регистрации |
+| `password_hash` | String | — | bcrypt-хэш. Пустой для НГТУ ID аккаунтов |
+| `name` | String | — | Короткое имя (из формы регистрации) |
+| `created_at` | DateTime | default=now | Дата создания |
+| `is_2fa_enabled` | Boolean | default=False | Включена ли двухфакторная авторизация |
+| `full_name` | String | nullable | ФИО из ЛК НГТУ (парсится автоматически) |
+| `student_group` | String | nullable | Группа из ЛК НГТУ (пр.: «АВТ-31») |
+| `is_synced_with_nstu` | Boolean | default=False | True после первой успешной синхронизации |
+
+**Связи (cascade=all, delete-orphan):**
+- `chats` → `Chat`
+- `student_data` → `StudentData`
+- `custom_subjects` → `CustomSubject`
+- `notes` → `Note`
+- `facts` → `UserFact`
+- `sessions` → `UserSession`
+- `projects` → `Project`
+- `tasks` → `Task`
+
+---
+
+### Таблица `chats`
+
+История диалогов пользователя с Byte AI.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | String | PK, index | UUID, генерируется на клиенте |
+| `user_id` | Integer | FK → users.id | Владелец |
+| `title` | String | — | Заголовок диалога (первое сообщение пользователя) |
+| `messages` | JSON | default=[] | Список `{role, content}` объектов |
+| `created_at` | DateTime | default=now | Дата создания |
+| `updated_at` | DateTime | default=now, onupdate=now | Дата последнего изменения |
+
+**Связи:** `user` → `User`
+
+---
+
+### Таблица `student_data`
+
+JSON-снапшоты страниц личного кабинета НГТУ (ciu.nstu.ru), обработанные GigaChat.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `user_id` | Integer | FK → users.id, index | Владелец |
+| `data_type` | String | index | Тип страницы: `profile \| timetable \| progress \| task \| kp_rgz_praktiki \| academic_backlog \| individual_progress \| timetable_consult \| timetable_session` |
+| `payload` | JSON | default=dict | Структурированные данные (различаются по `data_type`) |
+| `updated_at` | DateTime | default=now, onupdate=now | Дата последнего обновления снапшота |
+
+**Особенности:** Строка upsert-ится по паре `(user_id, data_type)` — одна строка на тип данных на пользователя.
+
+**Связи:** `user` → `User`
+
+---
+
+### Таблица `custom_subjects`
+
+Ручные предметы, созданные студентом для отслеживания накопительного балла.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `user_id` | Integer | FK → users.id, NOT NULL, index | Владелец |
+| `name` | String | NOT NULL | Название предмета |
+| `max_score` | Float | NOT NULL | Максимум баллов за семестр |
+| `target_score` | Float | NOT NULL | Желаемый балл студента |
+| `is_custom` | Boolean | default=True, NOT NULL | Всегда True (зарезервировано для будущих автоимпортированных) |
+
+**Связи:**
+- `user` → `User`
+- `scores` → `ScoreLog` (cascade=all, delete-orphan)
+
+---
+
+### Таблица `score_logs`
+
+Единичная запись балла, привязанная к предмету.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `subject_id` | Integer | FK → custom_subjects.id, NOT NULL, index | Предмет |
+| `score` | Float | NOT NULL | Количество баллов (может быть отрицательным — штраф) |
+| `description` | String | nullable | Комментарий (пр.: «КН-1», «Лабораторная №3») |
+| `created_at` | DateTime | NOT NULL, default=now | Дата записи (можно указать вручную при импорте) |
+
+**Связи:** `subject` → `CustomSubject`
+
+---
+
+### Таблица `notes`
+
+Markdown-заметки студента с AI-категоризацией.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `user_id` | Integer | FK → users.id, NOT NULL, index | Владелец |
+| `title` | String | NOT NULL, default="" | Заголовок заметки |
+| `content` | Text | NOT NULL, default="" | Тело заметки (Markdown) |
+| `category` | String | NOT NULL, default="Разное" | Категория (одно слово или несколько через запятую). При `ai_classify=true` дополняется словом от GigaChat |
+| `created_at` | DateTime | NOT NULL, default=now | Дата создания (можно задать при импорте) |
+| `updated_at` | DateTime | NOT NULL, default=now | Дата последнего редактирования |
+
+**Связи:** `user` → `User`
+
+---
+
+### Таблица `user_facts`
+
+Память ИИ о студенте. Факты извлекаются из чата, заметок, оценок и профиля ЛК.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `user_id` | Integer | FK → users.id (ondelete=CASCADE), NOT NULL, index | Владелец |
+| `fact_text` | String | NOT NULL | Текст факта (макс. 400 символов) |
+| `source` | String | NOT NULL, index | Источник: `cabinet \| chat \| notes \| grades` |
+| `created_at` | DateTime | NOT NULL, default=now | Дата создания |
+
+**Дедупликация:** При записи новых фактов сервер проверяет токен-сходство (стемминг) со всеми существующими фактами — дубликаты и парафразы отбрасываются.
+
+**Связи:** `user` → `User`
+
+---
+
+### Таблица `user_sessions`
+
+Одна залогиненная сессия (устройство). Удаление строки инвалидирует JWT.
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | String | PK, index | UUID, генерируется при каждом входе |
+| `user_id` | Integer | FK → users.id (ondelete=CASCADE), NOT NULL, index | Владелец |
+| `device_name` | String | NOT NULL, default="Неизвестное устройство" | Имя устройства из User-Agent или явно переданное |
+| `ip_address` | String | nullable | IP-адрес клиента (X-Forwarded-For или request.client) |
+| `last_active` | DateTime | NOT NULL, default=now | Обновляется при каждом запросе (debounce 60 сек) |
+
+**Связи:** `user` → `User`
+
+---
+
+### Таблица `projects`
+
+Верхнеуровневый контейнер задач (аналог проекта в Todoist).
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `user_id` | Integer | FK → users.id (ondelete=CASCADE), NOT NULL, index | Владелец |
+| `name` | String | NOT NULL | Название проекта (пр.: «Учёба», «Личное») |
+| `color` | String | NOT NULL, default="#6366f1" | HEX-цвет проекта |
+| `created_at` | DateTime | NOT NULL, default=now | Дата создания |
+
+**Связи:**
+- `user` → `User`
+- `sections` → `Section` (cascade=all, delete-orphan, order_by=position)
+- `tasks` → `Task` (cascade=all, delete-orphan)
+
+---
+
+### Таблица `sections`
+
+Именованная группа задач внутри проекта (аналог секции в Todoist).
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `project_id` | Integer | FK → projects.id (ondelete=CASCADE), NOT NULL, index | Проект-владелец |
+| `name` | String | NOT NULL | Название секции (пр.: «1 семестр», «Лабораторные») |
+| `position` | Integer | NOT NULL, default=0 | Порядок отображения |
+
+**Связи:**
+- `project` → `Project`
+- `tasks` → `Task` (cascade=all, delete-orphan)
+
+---
+
+### Таблица `tasks`
+
+Единичная задача. Может быть в проекте и/или секции, или в «Входящих» (без проекта).
+
+| Колонка | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | Integer | PK, index | Автоинкремент |
+| `user_id` | Integer | FK → users.id (ondelete=CASCADE), NOT NULL, index | Владелец |
+| `project_id` | Integer | FK → projects.id (ondelete=CASCADE), nullable | Проект (null = Входящие) |
+| `section_id` | Integer | FK → sections.id (ondelete=CASCADE), nullable | Секция (null = без секции) |
+| `title` | String | NOT NULL | Заголовок задачи |
+| `description` | Text | nullable, default="" | Подробное описание |
+| `due_date` | DateTime | nullable | Срок выполнения |
+| `priority` | Integer | NOT NULL, default=4 | Приоритет: 1 (наивысший) … 4 (нет приоритета) |
+| `is_completed` | Boolean | NOT NULL, default=False | Выполнена ли |
+| `created_at` | DateTime | NOT NULL, default=now | Дата создания |
+| `updated_at` | DateTime | NOT NULL, default=now | Дата последнего изменения |
+
+**Связи:**
+- `user` → `User`
+- `project` → `Project`
+- `section` → `Section`
+
+---
+
+## 3. Карта API и эндпоинтов
+
+**Бэкенд:** FastAPI (Python), порт `8000`
+**Аутентификация:** JWT Bearer Token (срок 7 дней)
+**CORS:** `allow_origins=["*"]` (на время разработки)
+**Pydantic-схемы:** все в `backend/models.py`
+
+---
+
+### 3.0 Корневые эндпоинты (`main.py`)
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `GET` | `/` | — | `{message: str}` | Health-check |
+| `POST` | `/ask` | `AskRequest` | `{answer: str}` | Чат с GigaChat-2-Pro. Принимает массив `messages: [{role, content}]`, возвращает ответ модели. Используется экраном Byte |
+
+**Схема `AskRequest`:**
+```python
+class AskRequest(BaseModel):
+    messages: List[Message]  # [{role: "user"|"assistant"|"system", content: str}]
+```
+
+---
+
+### 3.1 Auth (`/auth`) — `backend/auth.py`
+
+Все запросы без JWT (кроме помеченных 🔒).
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `POST` | `/auth/register/init` | `RegisterInit` | `{status, message}` | Шаг 1 регистрации. Проверяет домен `@stud.nstu.ru`, отправляет 6-значный код на email |
+| `POST` | `/auth/register/verify` | `VerifyRegister` | `{access_token, token_type, user}` | Шаг 2 регистрации. Проверяет код → создаёт `User` → возвращает JWT |
+| `POST` | `/auth/login` | `UserLogin` | `{access_token, ...}` или `{status: "requires_verification"}` | Вход по email+password. При 2FA возвращает статус вместо токена |
+| `POST` | `/auth/login/verify` | `VerifyLogin` | `{access_token, token_type, user}` | 2FA: подтверждение кода после `/auth/login` |
+| `POST` | `/auth/nstu-login` | `NstuLoginRequest` | `{access_token, token_type, has_password, created, user}` | Вход/регистрация через НГТУ ID (email из ЛК). Новые аккаунты создаются без BYTE-пароля |
+| `GET` 🔒 | `/auth/me` | — | `UserResponse + {created_at}` | Данные текущего пользователя |
+| `DELETE` 🔒 | `/auth/delete` | — | `{status, message}` | Необратимое удаление аккаунта и всех связанных данных |
+| `PATCH` 🔒 | `/auth/2fa` | `Set2FARequest` | `{status, is_2fa_enabled, message}` | Включить/выключить двухфакторную аутентификацию |
+| `POST` 🔒 | `/auth/password-reset/request` | — | `{status, message}` | Отправить код смены пароля на email пользователя |
+| `POST` 🔒 | `/auth/password-reset/confirm` | `PasswordResetConfirm` | `{status, has_password, message}` | Подтвердить смену пароля кодом + новый пароль |
+| `POST` 🔒 | `/auth/set-password` | `SetPasswordRequest` | `{status, has_password, message}` | Установить BYTE-пароль для аккаунтов без пароля (НГТУ ID) |
+| `POST` 🔒 | `/auth/chats/save` | `ChatSave` | `{success: true}` | Upsert диалога по UUID. Синхронизирует историю чатов с сервером |
+| `GET` 🔒 | `/auth/chats` | — | `List[ChatHistory]` | Все диалоги пользователя (id, title, messages, created_at, updated_at) |
+| `GET` 🔒 | `/auth/sessions` | — | `List[UserSessionResponse]` | Список активных сессий. Текущая помечена `is_current: true` |
+| `DELETE` 🔒 | `/auth/sessions/other` | — | `{status, revoked: int}` | Завершить все сессии кроме текущей |
+| `DELETE` 🔒 | `/auth/sessions/{session_id}` | — | `{status: "deleted"}` | Завершить одну конкретную сессию по UUID |
+
+**Ключевые схемы:**
+
+```python
+class RegisterInit(BaseModel):
+    email: EmailStr      # должен быть @stud.nstu.ru
+    password: str
+    name: str
+
+class VerifyRegister(BaseModel):
+    email: EmailStr
+    code: str
+    device_name: Optional[str]   # макс. 120 символов
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+    device_name: Optional[str]
+
+class NstuLoginRequest(BaseModel):
+    email: EmailStr
+    device_name: Optional[str]
+
+class Set2FARequest(BaseModel):
+    enabled: bool
+
+class PasswordResetConfirm(BaseModel):
+    code: str
+    new_password: str   # минимум 6 символов
+
+class SetPasswordRequest(BaseModel):
+    new_password: str   # минимум 6 символов
+
+class UserSessionResponse(BaseModel):
+    id: str
+    device_name: str
+    ip_address: Optional[str]
+    last_active: datetime
+    is_current: bool
+```
+
+---
+
+### 3.2 Sync / Parser (`/sync`) — `backend/parser.py`
+
+Парсинг страниц личного кабинета НГТУ через GigaChat.
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `POST` 🔒 | `/sync/parse-cabinet` | `CabinetParseRequest` | `{status, page_type, payload, is_synced_with_nstu, full_name, student_group}` | Принимает сырой текст страницы ЛК, передаёт GigaChat-2-Pro для структурирования, сохраняет в `student_data`. При `page_type=profile` обновляет `User.full_name` и `User.student_group` |
+| `GET` 🔒 | `/sync/student-data` | `?types=profile,timetable,...` | `{items: {data_type: {payload, updated_at}}}` | Возвращает сохранённые снапшоты ЛК. Опциональная фильтрация по `types` (через запятую) |
+
+**Схема `CabinetParseRequest`:**
+```python
+class CabinetParseRequest(BaseModel):
+    page_type: str   # profile | timetable | progress | task | kp_rgz_praktiki |
+                     # academic_backlog | individual_progress | timetable_consult | timetable_session
+    raw_text: str    # Сырой текст страницы (макс. 20 000 символов, обрезается)
+```
+
+**Промпты GigaChat по `page_type`:**
+
+| `page_type` | Что возвращает GigaChat |
+|-------------|------------------------|
+| `profile` | `{full_name, student_group, faculty, course, record_book, specialty}` |
+| `timetable` | `{days: [{day, date, lessons: [{time, subject, type, room, teacher, week}]}]}` |
+| `progress` | `{semester, control_week, subjects: [{name, control_type, grade, points, teacher, attestation}]}` |
+| `task` / `kp_rgz_praktiki` | `{tasks: [{subject, title, task_type, deadline, status, teacher, comment}]}` |
+| `academic_backlog` | `{backlogs: [{subject, teacher, control_type, status, deadline, semester}]}` |
+| `individual_progress` | `{achievements: [{title, category, date, level, result, document}]}` |
+| `timetable_session` | `{exams: [{subject, date, time, room, teacher, control_type}]}` |
+| `timetable_consult` | `{consultations: [{subject, date, time, room, teacher}]}` |
+
+---
+
+### 3.3 Subjects / Grades (`/subjects`) — `backend/subjects.py`
+
+Ручное отслеживание накопительных баллов по предметам.
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `POST` 🔒 | `/subjects` | `CustomSubjectCreate` | `dict` (subject+scores) | Создать новый предмет |
+| `GET` 🔒 | `/subjects` | — | `{items: [subject+scores]}` | Список всех предметов пользователя с накопленными баллами |
+| `POST` 🔒 | `/subjects/{subject_id}/scores` | `ScoreLogCreate` | `dict` (score) | Добавить запись балла к предмету |
+| `DELETE` 🔒 | `/subjects/{subject_id}/scores/{score_id}` | — | `{status, id}` | Удалить запись балла |
+
+**Схемы:**
+```python
+class CustomSubjectCreate(BaseModel):
+    name: str
+    max_score: float      # > 0
+    target_score: float   # >= 0
+    is_custom: bool = True
+
+class ScoreLogCreate(BaseModel):
+    score: float              # != 0
+    description: Optional[str]
+    created_at: Optional[datetime]  # Если не указан — datetime.utcnow()
+```
+
+---
+
+### 3.4 Notes (`/notes`) — `backend/notes.py`
+
+Markdown-заметки с опциональной AI-категоризацией.
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `GET` 🔒 | `/notes` | — | `{items: [NoteResponse]}` | Все заметки пользователя (сортировка по убыванию `created_at`) |
+| `POST` 🔒 | `/notes` | `NoteCreate` | `dict` (note) | Создать заметку. При `ai_classify=true` категория определяется GigaChat-2-Pro |
+| `PUT` 🔒 | `/notes/{note_id}` | `NoteUpdate` | `dict` (note) | Обновить заметку. При `ai_classify=true` категория пересчитывается |
+| `DELETE` 🔒 | `/notes/{note_id}` | — | `{status, id}` | Удалить заметку |
+
+**Схемы:**
+```python
+class NoteCreate(BaseModel):
+    title: str = ""
+    content: str = ""
+    category: Optional[str] = None     # Ручная категория
+    ai_classify: bool = False           # Если True — GigaChat определяет категорию
+    created_at: Optional[datetime]      # Для импорта с конкретной датой
+
+class NoteUpdate(BaseModel):
+    title: Optional[str]
+    content: Optional[str]
+    category: Optional[str]
+    ai_classify: bool = False
+```
+
+---
+
+### 3.5 Facts / AI Memory (`/profile`) — `backend/facts.py`
+
+Факты об ИИ-памяти студента. Читать и удалять может только сам студент.
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `GET` 🔒 | `/profile/facts` | — | `UserFactsGroupedResponse` | Все факты, сгруппированные по источнику: `{cabinet, chat, notes, grades}` |
+| `POST` 🔒 | `/profile/facts` | `UserFactsCreate` | `{created: [UserFactResponse]}` | Записать список фактов. Дубликаты и парафразы автоматически отфильтровываются |
+| `PUT` 🔒 | `/profile/facts/{fact_id}` | `UserFactUpdate` | `dict` (fact) | Изменить текст одного факта |
+| `DELETE` 🔒 | `/profile/facts/all` | — | `{status, deleted: int}` | Полная очистка памяти ИИ о пользователе |
+| `DELETE` 🔒 | `/profile/facts/{fact_id}` | — | `{status, id}` | Удалить один факт |
+
+**Схемы:**
+```python
+class UserFactsCreate(BaseModel):
+    facts: List[str]        # Макс. 12 фактов за один запрос, каждый ≤ 400 символов
+    source: str = "chat"    # cabinet | chat | notes | grades
+
+class UserFactUpdate(BaseModel):
+    fact_text: str   # Не пустой, ≤ 400 символов
+
+class UserFactsGroupedResponse(BaseModel):
+    groups: Dict[str, List[UserFactResponse]]
+    # Ключи: "cabinet", "chat", "notes", "grades" (и любой другой source)
+```
+
+---
+
+### 3.6 Todos (`/todos`) — `backend/todos.py`
+
+Todoist-подобный таск-менеджер: Проекты → Секции → Задачи.
+
+| Метод | URL | Схема запроса | Схема ответа | Описание |
+|-------|-----|--------------|--------------|----------|
+| `GET` 🔒 | `/todos/data` | — | `TodosDataResponse` | Полное дерево данных: проекты + секции + задачи + inbox (задачи без проекта). Один запрос для всего экрана |
+| `POST` 🔒 | `/todos/projects` | `ProjectCreate` | `ProjectResponse` | Создать проект |
+| `POST` 🔒 | `/todos/sections` | `SectionCreate` | `SectionResponse` | Создать секцию внутри проекта (проект должен принадлежать текущему пользователю) |
+| `POST` 🔒 | `/todos/tasks` | `TaskCreate` | `TaskResponse` | Создать задачу. Валидирует принадлежность проекта и секции пользователю |
+| `PUT` 🔒 | `/todos/tasks/{task_id}` | `TaskUpdate` | `TaskResponse` | Частичное обновление задачи (только переданные поля). Поддерживает перемещение между проектами/секциями |
+| `DELETE` 🔒 | `/todos/tasks/{task_id}` | — | 204 No Content | Удалить задачу |
+
+**Схемы:**
+```python
+class ProjectCreate(BaseModel):
+    name: str
+    color: str = "#6366f1"   # HEX
+
+class SectionCreate(BaseModel):
+    project_id: int
+    name: str
+    position: int = 0
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    project_id: Optional[int] = None   # None = Входящие
+    section_id: Optional[int] = None   # None = без секции
+    due_date: Optional[datetime] = None
+    priority: int = Field(default=4, ge=1, le=4)  # 1=срочно, 4=нет приоритета
+
+class TaskUpdate(BaseModel):
+    title: Optional[str]
+    description: Optional[str]
+    project_id: Optional[int]
+    section_id: Optional[int]
+    due_date: Optional[datetime]
+    priority: Optional[int]     # ge=1, le=4
+    is_completed: Optional[bool]
+
+class TodosDataResponse(BaseModel):
+    projects: List[ProjectWithDataResponse]  # Проекты с секциями и задачами внутри
+    inbox_tasks: List[TaskResponse]          # Задачи без проекта
+```
+
+---
+
+### Итоговая таблица всех эндпоинтов
+
+| # | Метод | Путь | Auth | Роутер |
+|---|-------|------|------|--------|
+| 1 | GET | `/` | — | main |
+| 2 | POST | `/ask` | — | main |
+| 3 | POST | `/auth/register/init` | — | auth |
+| 4 | POST | `/auth/register/verify` | — | auth |
+| 5 | POST | `/auth/login` | — | auth |
+| 6 | POST | `/auth/login/verify` | — | auth |
+| 7 | POST | `/auth/nstu-login` | — | auth |
+| 8 | GET | `/auth/me` | 🔒 | auth |
+| 9 | DELETE | `/auth/delete` | 🔒 | auth |
+| 10 | PATCH | `/auth/2fa` | 🔒 | auth |
+| 11 | POST | `/auth/password-reset/request` | 🔒 | auth |
+| 12 | POST | `/auth/password-reset/confirm` | 🔒 | auth |
+| 13 | POST | `/auth/set-password` | 🔒 | auth |
+| 14 | POST | `/auth/chats/save` | 🔒 | auth |
+| 15 | GET | `/auth/chats` | 🔒 | auth |
+| 16 | GET | `/auth/sessions` | 🔒 | auth |
+| 17 | DELETE | `/auth/sessions/other` | 🔒 | auth |
+| 18 | DELETE | `/auth/sessions/{session_id}` | 🔒 | auth |
+| 19 | POST | `/sync/parse-cabinet` | 🔒 | parser |
+| 20 | GET | `/sync/student-data` | 🔒 | parser |
+| 21 | POST | `/subjects` | 🔒 | subjects |
+| 22 | GET | `/subjects` | 🔒 | subjects |
+| 23 | POST | `/subjects/{id}/scores` | 🔒 | subjects |
+| 24 | DELETE | `/subjects/{id}/scores/{score_id}` | 🔒 | subjects |
+| 25 | GET | `/notes` | 🔒 | notes |
+| 26 | POST | `/notes` | 🔒 | notes |
+| 27 | PUT | `/notes/{note_id}` | 🔒 | notes |
+| 28 | DELETE | `/notes/{note_id}` | 🔒 | notes |
+| 29 | GET | `/profile/facts` | 🔒 | facts |
+| 30 | POST | `/profile/facts` | 🔒 | facts |
+| 31 | PUT | `/profile/facts/{fact_id}` | 🔒 | facts |
+| 32 | DELETE | `/profile/facts/all` | 🔒 | facts |
+| 33 | DELETE | `/profile/facts/{fact_id}` | 🔒 | facts |
+| 34 | GET | `/todos/data` | 🔒 | todos |
+| 35 | POST | `/todos/projects` | 🔒 | todos |
+| 36 | POST | `/todos/sections` | 🔒 | todos |
+| 37 | POST | `/todos/tasks` | 🔒 | todos |
+| 38 | PUT | `/todos/tasks/{task_id}` | 🔒 | todos |
+| 39 | DELETE | `/todos/tasks/{task_id}` | 🔒 | todos |
+
+---
+
+## 4. Инструкция для ИИ-агентов
+
+> **ОБЯЗАТЕЛЬНО прочитай этот раздел перед внесением любых изменений в кодовую базу BYTE.**
+
+### Правило №1 — Сначала читай, потом пиши
+
+Перед любым изменением кода:
+1. Прочти этот файл `ARCHITECTURE.md` целиком.
+2. Найди нужный файл по карте в разделе 1 (фронтенд) или разделах 2–3 (бэкенд).
+3. Прочти сам файл перед редактированием.
+
+### Правило №2 — Обнови этот файл после изменений
+
+После внесения изменений **обязательно обнови `ARCHITECTURE.md`**, если:
+- **Добавлена/изменена таблица БД** → обнови раздел 2 (добавь колонки, измени типы, добавь связи).
+- **Добавлен/изменён/удалён API-эндпоинт** → обнови раздел 3 (метод, URL, схемы, описание) и итоговую таблицу.
+- **Добавлен новый экран или компонент** → обнови раздел 1 (дерево файлов + таблицу маппинга).
+- **Изменились Pydantic-схемы** (`backend/models.py`) → обнови соответствующий подраздел 3.x.
+
+### Правило №3 — Структура файлов бэкенда
+
+```
+backend/
+├── main.py        # FastAPI app, CORS, подключение роутеров, /ask эндпоинт
+├── database.py    # SQLAlchemy модели + миграции (_run_migrations)
+├── models.py      # Все Pydantic-схемы запросов и ответов
+├── auth.py        # Роутер /auth: login, register, sessions, 2FA, password
+├── parser.py      # Роутер /sync: парсинг ЛК НГТУ через GigaChat
+├── subjects.py    # Роутер /subjects: ручные предметы и баллы
+├── notes.py       # Роутер /notes: markdown заметки
+├── facts.py       # Роутер /profile: AI-память студента (UserFacts)
+└── todos.py       # Роутер /todos: таск-менеджер (Project/Section/Task)
+```
+
+### Правило №4 — Структура фронтенда
+
+- **Экраны** живут в `frontend/src/screens/` — это единственное место с логикой.
+- **Файлы в `app/`** — только тонкие re-export через `export { default } from '...'`. Логику туда не добавлять.
+- **API-запросы** оборачиваются в `src/api/http.ts → apiFetch()`, который автоматически добавляет заголовок `Authorization: Bearer <token>` и обрабатывает 401.
+- **Глобальное состояние** только через `AuthContext`. Новые контексты добавлять только при крайней необходимости.
+- **Expo SDK 57**: перед использованием любого Expo-пакета читай актуальную документацию на `https://docs.expo.dev/versions/v57.0.0/`.
+
+### Правило №5 — Безопасность
+
+- **JWT** содержит `{sub: email, id: user_id, session_id}`. Проверка сессии в БД выполняется при **каждом** запросе через `resolve_user()` в `auth.py`.
+- **Cascade deletes:** удаление `User` автоматически удаляет все его данные (chats, notes, facts, sessions, tasks, projects, subjects). Проверяй каскады при добавлении новых FK.
+- **Изоляция данных:** каждый роутер проверяет `user_id == current_user.id` перед доступом к записи. Никогда не убирай эту проверку.
+
+---
+
+*Файл сгенерирован автоматически по аудиту репозитория. Последнее обновление: **октябрь 2026**.*
+*При изменении структуры проекта обновляй этот файл вместе с кодом.*
