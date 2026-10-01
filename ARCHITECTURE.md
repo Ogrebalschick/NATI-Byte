@@ -57,7 +57,7 @@ frontend/src/
 ├── screens/                      # Логика экранов (импортируются через app/)
 │   ├── AuthScreen.tsx            # Авторизация / Регистрация
 │   ├── byte.tsx                  # Чат с ИИ Byte (GigaChat)
-│   ├── ServicesScreen.tsx        # Вкладка «Сервисы»
+│   ├── ServicesScreen.tsx        # Сетка сервисов: задачи, достижения, заглушки будущих разделов
 │   ├── StatisticsScreen.tsx      # Статистика / Успеваемость (не таб, вход из профиля)
 │   ├── NotesScreen.tsx           # Заметки
 │   ├── TodoScreen.tsx            # Список дел (Task Manager)
@@ -155,7 +155,7 @@ frontend/src/
 |-------|--------------------|--------------------|----------|
 | **Стартовый редирект** | `/` | `app/index.tsx` | Немедленно редиректит на `/(tabs)/chat` |
 | **Чат (Byte AI)** | `/(tabs)/chat` | `screens/byte.tsx` | Главный чат с ИИ. Использует GigaChat через `POST /ask`. Хранит историю локально + синхронизирует через `POST /auth/chats/save` |
-| **Сервисы** | `/(tabs)/services` | `screens/ServicesScreen.tsx` | Вкладка таб-бара вместо статистики. Подпись «Сервисы», иконка сетки из 9 точек (`Ionicons` `apps-sharp` / `apps-outline`) |
+| **Сервисы** | `/(tabs)/services` | `screens/ServicesScreen.tsx` | Сетка плиток 3 в ряд. «Трекер дел» → `navigate('/todos')`, «Достижения» → `navigate('/statistics')`. Остальные плитки, включая «Флудилку», показывают тёмный тост «Сервис появится в следующих обновлениях BYTE» |
 | **Статистика** | `/(tabs)/statistics` | `screens/StatisticsScreen.tsx` | Экран успеваемости без пункта в таб-баре (`href: null`). Открывается из профиля. GPA, контрольные недели, ручные предметы. Данные: `GET /sync/student-data` + `GET /subjects` |
 | **Список дел** | `/(tabs)/todos` | `screens/TodoScreen.tsx` | Todoist-подобный таск-менеджер. Два режима: **Список** (проекты → разделы → задачи) и **Календарь** (Google Calendar-стиль, три вкладки с жестами навигации). В режиме «Список»: дашборд из 4 карточек-метрик (Всего / В работе / На сегодня / Выполнено) с интерактивной фильтрацией. Создание задачи: умный ввод проекта/раздела (строка = создать новый), два DateTimePicker для `due_date` и `schedule_date`, поле `duration_minutes` с пресетами. Данные: `GET /todos/data` |
 | **Заметки** | `/(tabs)/notes` | `screens/NotesScreen.tsx` | Markdown-заметки с AI-категоризацией через GigaChat. Данные: `GET /notes` |
