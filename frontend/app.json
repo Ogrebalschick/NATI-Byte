@@ -46,7 +46,13 @@
       "expo-font",
       "expo-image",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Разрешите $(PRODUCT_NAME) использовать Face ID для входа в приложение."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
