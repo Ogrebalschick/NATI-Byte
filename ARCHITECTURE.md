@@ -77,8 +77,8 @@ frontend/src/
 │   │   ├── error.tsx             # Состояние ошибки в чате
 │   │   └── crisis.tsx            # Кризисная интервенция (особые ситуации)
 │   ├── todos/
-│   │   ├── CalendarView.tsx      # Google Calendar-стиль: 28-дневная лента + почасовая сетка 07–22. Показывает задачи дважды: 🛠️ schedule_date + 🚨 due_date
-│   │   └── CreateTaskModal.tsx   # Модал создания задачи: умный выбор проекта/раздела (чипы + «Новый» → строка на лету), DateTimePicker для due_date и schedule_date
+│   │   ├── CalendarView.tsx      # Три режима (День/Неделя/Месяц), сегм. переключатель, 28-дневная лента (фикс. ширина), почасовая сетка с высотой карточки по duration_minutes, клик → onTaskPress
+    │   │   └── CreateTaskModal.tsx   # Создание И редактирование задач (editingTask prop): проект/раздел чипы + «Новый», DateTimePicker, поле duration_minutes с пресетами, P1–P4
 │   ├── stats/
 │   │   ├── CircularGpa.tsx       # Круговой индикатор GPA
 │   │   ├── CircularPercent.tsx   # Круговой индикатор в %

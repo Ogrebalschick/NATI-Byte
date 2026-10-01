@@ -1,13 +1,18 @@
 /**
- * CreateTaskModal — модальное окно создания задачи.
+ * CreateTaskModal — модальное окно создания / редактирования задачи.
  *
- * Новые возможности по сравнению с предыдущей версией:
- *   • Проект: чипы существующих + кнопка «+ Новый» → TextInput для нового имени.
- *     Отправляет number (ID) для существующих, string для нового.
- *   • Раздел: то же самое, только среди разделов выбранного проекта.
- *   • Дедлайн (due_date): DateTimePicker с выбором даты И времени.
- *   • Дата выполнения (schedule_date): отдельный DateTimePicker.
- *   • Обе даты — полный формат ДД.ММ.ГГГГ ЧЧ:ММ без ограничения на 30 дней.
+ * Режимы:
+ *   • Создание (editingTask = null): поля пустые, кнопка «Добавить задачу».
+ *   • Редактирование (editingTask = <task>): поля предзаполнены, кнопка «Сохранить».
+ *
+ * Поля:
+ *   • Название, описание
+ *   • Проект: чипы + «+ Новый» → TextInput
+ *   • Раздел: чипы текущего проекта + «+ Новый» → TextInput
+ *   • Дедлайн (due_date): DateTimePicker (iOS inline, Android 2-step)
+ *   • Дата выполнения (schedule_date): то же самое
+ *   • Длительность (duration_minutes): TextInput для ввода минут
+ *   • Приоритет: 4 кнопки P1–P4
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -27,7 +32,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
-import type { TodoProject } from '../../storage/todosStorage';
+import type { TodoProject, TodoTask } from '../../storage/todosStorage';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -56,6 +61,7 @@ export interface CreateTaskPayload {
   section_id: number | string | null;
   due_date: string | null;
   schedule_date: string | null;
+  duration_minutes: number | null;
   priority: 1 | 2 | 3 | 4;
 }
 
@@ -65,6 +71,8 @@ interface Props {
   defaultProjectId: string | null;
   onClose: () => void;
   onSubmit: (payload: CreateTaskPayload) => void;
+  /** Если передан — форма открывается в режиме редактирования */
+  editingTask?: TodoTask | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -208,7 +216,16 @@ const dtStyles = StyleSheet.create({
 
 // ── CreateTaskModal ───────────────────────────────────────────────────────────
 
-export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, onSubmit }: Props) {
+export function CreateTaskModal({
+  visible,
+  projects,
+  defaultProjectId,
+  onClose,
+  onSubmit,
+  editingTask,
+}: Props) {
+  const isEditMode = !!editingTask;
+
   // ── Basic fields ───────────────────────────────────────────────────────────
   const [title, setTitle]       = useState('');
   const [description, setDesc]  = useState('');
@@ -218,8 +235,10 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
   const [dueDate, setDueDate]           = useState<Date | null>(null);
   const [scheduleDate, setScheduleDate] = useState<Date | null>(null);
 
+  // ── Duration ──────────────────────────────────────────────────────────────
+  const [durationText, setDurationText] = useState<string>('30');
+
   // ── Project selector state ─────────────────────────────────────────────────
-  // selectedProjectId: number = existing, 'new' = typing new name, null = Inbox
   const [selectedProjectId, setSelectedProjectId] = useState<number | 'new' | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
 
@@ -227,22 +246,51 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
   const [selectedSectionId, setSelectedSectionId] = useState<number | 'new' | null>(null);
   const [newSectionName, setNewSectionName] = useState('');
 
-  // ── Sync defaultProjectId on open ─────────────────────────────────────────
+  // ── Populate / reset on open ──────────────────────────────────────────────
   useEffect(() => {
-    if (visible) {
+    if (!visible) return;
+
+    if (editingTask) {
+      // Edit mode — pre-fill from existing task
+      setTitle(editingTask.title);
+      setDesc(editingTask.description ?? '');
+      setPriority(editingTask.priority);
+      setDueDate(editingTask.due_date ? new Date(editingTask.due_date) : null);
+      setScheduleDate(editingTask.schedule_date ? new Date(editingTask.schedule_date) : null);
+      setDurationText(String(editingTask.duration_minutes ?? 30));
+
+      const pid = editingTask.project_id ? Number(editingTask.project_id) : null;
+      setSelectedProjectId(!isNaN(pid as number) ? pid : null);
+
+      const sid = editingTask.section_id ? Number(editingTask.section_id) : null;
+      setSelectedSectionId(!isNaN(sid as number) ? sid : null);
+
+      setNewProjectName('');
+      setNewSectionName('');
+    } else {
+      // Create mode — reset fields
+      setTitle('');
+      setDesc('');
+      setPriority(4);
+      setDueDate(null);
+      setScheduleDate(null);
+      setDurationText('30');
       const num = defaultProjectId ? Number(defaultProjectId) : null;
       setSelectedProjectId(num && !isNaN(num) ? num : null);
       setSelectedSectionId(null);
+      setNewProjectName('');
+      setNewSectionName('');
     }
-  }, [visible, defaultProjectId]);
+  }, [visible, editingTask, defaultProjectId]);
 
-  // ── Reset on close ────────────────────────────────────────────────────────
+  // ── Reset helper ──────────────────────────────────────────────────────────
   const reset = useCallback(() => {
     setTitle('');
     setDesc('');
     setPriority(4);
     setDueDate(null);
     setScheduleDate(null);
+    setDurationText('30');
     setSelectedProjectId(null);
     setSelectedSectionId(null);
     setNewProjectName('');
@@ -267,18 +315,24 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
     // Resolve project reference
     let projectRef: number | string | null = null;
     if (selectedProjectId === 'new' && newProjectName.trim()) {
-      projectRef = newProjectName.trim();     // string → backend creates project
+      projectRef = newProjectName.trim();
     } else if (typeof selectedProjectId === 'number') {
-      projectRef = selectedProjectId;          // number → existing project ID
+      projectRef = selectedProjectId;
     }
 
     // Resolve section reference
     let sectionRef: number | string | null = null;
     if (selectedSectionId === 'new' && newSectionName.trim()) {
-      sectionRef = newSectionName.trim();     // string → backend creates section
+      sectionRef = newSectionName.trim();
     } else if (typeof selectedSectionId === 'number') {
-      sectionRef = selectedSectionId;          // number → existing section ID
+      sectionRef = selectedSectionId;
     }
+
+    // Parse duration
+    const parsedDuration = parseInt(durationText, 10);
+    const duration = !isNaN(parsedDuration) && parsedDuration > 0
+      ? Math.min(parsedDuration, 1440)
+      : 30;
 
     onSubmit({
       title: trimmedTitle,
@@ -287,6 +341,7 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
       section_id: sectionRef,
       due_date: dueDate?.toISOString() ?? null,
       schedule_date: scheduleDate?.toISOString() ?? null,
+      duration_minutes: duration,
       priority,
     });
 
@@ -313,7 +368,9 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
         >
           {/* Handle */}
           <View style={styles.handle} />
-          <Text style={styles.modalTitle}>Новая задача</Text>
+          <Text style={styles.modalTitle}>
+            {isEditMode ? 'Редактировать задачу' : 'Новая задача'}
+          </Text>
 
           {/* ── Title ──────────────────────────────────────────────────── */}
           <TextInput
@@ -322,7 +379,7 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
             placeholderTextColor={MUTED}
             value={title}
             onChangeText={setTitle}
-            autoFocus
+            autoFocus={!isEditMode}
             returnKeyType="next"
           />
 
@@ -338,101 +395,102 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
           />
 
           {/* ── Project selector ───────────────────────────────────────── */}
-          <Text style={styles.sectionLabel}>Проект</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {/* Inbox chip */}
-            <TouchableOpacity
-              onPress={() => { setSelectedProjectId(null); setSelectedSectionId(null); setNewProjectName(''); }}
-              style={[styles.chip, selectedProjectId === null && selectedProjectId !== 'new' && styles.chipActive]}
-            >
-              <Ionicons name="archive-outline" size={12} color={selectedProjectId === null ? '#fff' : TEXT2} style={{ marginRight: 4 }} />
-              <Text style={[styles.chipText, selectedProjectId === null && styles.chipTextActive]}>Входящие</Text>
-            </TouchableOpacity>
-
-            {/* Existing projects */}
-            {projects.map(p => {
-              const pid = Number(p.id);
-              const isSelected = selectedProjectId === pid;
-              return (
-                <TouchableOpacity
-                  key={p.id}
-                  onPress={() => { setSelectedProjectId(pid); setSelectedSectionId(null); setNewProjectName(''); }}
-                  style={[styles.chip, isSelected && styles.chipActive]}
-                >
-                  <View style={[styles.chipDot, { backgroundColor: p.color }]} />
-                  <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{p.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
-
-            {/* "New project" chip */}
-            <TouchableOpacity
-              onPress={() => { setSelectedProjectId('new'); setSelectedSectionId(null); }}
-              style={[styles.chip, styles.chipNew, selectedProjectId === 'new' && styles.chipNewActive]}
-            >
-              <Ionicons name="add" size={14} color={selectedProjectId === 'new' ? '#0A84FF' : TEXT2} />
-              <Text style={[styles.chipText, selectedProjectId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
-            </TouchableOpacity>
-          </ScrollView>
-
-          {/* New project name input */}
-          {selectedProjectId === 'new' && (
-            <TextInput
-              style={[styles.input, { marginTop: 6 }]}
-              placeholder="Название нового проекта..."
-              placeholderTextColor={MUTED}
-              value={newProjectName}
-              onChangeText={setNewProjectName}
-              autoFocus
-            />
-          )}
-
-          {/* ── Section selector (only if a project is selected) ────────── */}
-          {(selectedProject || selectedProjectId === 'new') && (
+          {!isEditMode && (
             <>
-              <Text style={styles.sectionLabel}>Раздел</Text>
+              <Text style={styles.sectionLabel}>Проект</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {/* No section */}
+                {/* Inbox chip */}
                 <TouchableOpacity
-                  onPress={() => { setSelectedSectionId(null); setNewSectionName(''); }}
-                  style={[styles.chip, selectedSectionId === null && styles.chipActive]}
+                  onPress={() => { setSelectedProjectId(null); setSelectedSectionId(null); setNewProjectName(''); }}
+                  style={[styles.chip, selectedProjectId === null && styles.chipActive]}
                 >
-                  <Text style={[styles.chipText, selectedSectionId === null && styles.chipTextActive]}>Без раздела</Text>
+                  <Ionicons name="archive-outline" size={12} color={selectedProjectId === null ? '#fff' : TEXT2} style={{ marginRight: 4 }} />
+                  <Text style={[styles.chipText, selectedProjectId === null && styles.chipTextActive]}>Входящие</Text>
                 </TouchableOpacity>
 
-                {/* Existing sections */}
-                {(selectedProject?.sections ?? []).map(s => {
-                  const sid = Number(s.id);
-                  const isSelected = selectedSectionId === sid;
+                {/* Existing projects */}
+                {projects.map(p => {
+                  const pid = Number(p.id);
+                  const isSelected = selectedProjectId === pid;
                   return (
                     <TouchableOpacity
-                      key={s.id}
-                      onPress={() => { setSelectedSectionId(sid); setNewSectionName(''); }}
+                      key={p.id}
+                      onPress={() => { setSelectedProjectId(pid); setSelectedSectionId(null); setNewProjectName(''); }}
                       style={[styles.chip, isSelected && styles.chipActive]}
                     >
-                      <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{s.name}</Text>
+                      <View style={[styles.chipDot, { backgroundColor: p.color }]} />
+                      <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{p.name}</Text>
                     </TouchableOpacity>
                   );
                 })}
 
-                {/* "New section" chip */}
+                {/* "New project" chip */}
                 <TouchableOpacity
-                  onPress={() => setSelectedSectionId('new')}
-                  style={[styles.chip, styles.chipNew, selectedSectionId === 'new' && styles.chipNewActive]}
+                  onPress={() => { setSelectedProjectId('new'); setSelectedSectionId(null); }}
+                  style={[styles.chip, styles.chipNew, selectedProjectId === 'new' && styles.chipNewActive]}
                 >
-                  <Ionicons name="add" size={14} color={selectedSectionId === 'new' ? '#0A84FF' : TEXT2} />
-                  <Text style={[styles.chipText, selectedSectionId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
+                  <Ionicons name="add" size={14} color={selectedProjectId === 'new' ? '#0A84FF' : TEXT2} />
+                  <Text style={[styles.chipText, selectedProjectId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
                 </TouchableOpacity>
               </ScrollView>
 
-              {selectedSectionId === 'new' && (
+              {/* New project name input */}
+              {selectedProjectId === 'new' && (
                 <TextInput
                   style={[styles.input, { marginTop: 6 }]}
-                  placeholder="Название нового раздела..."
+                  placeholder="Название нового проекта..."
                   placeholderTextColor={MUTED}
-                  value={newSectionName}
-                  onChangeText={setNewSectionName}
+                  value={newProjectName}
+                  onChangeText={setNewProjectName}
+                  autoFocus
                 />
+              )}
+
+              {/* ── Section selector ────────────────────────────────────── */}
+              {(selectedProject || selectedProjectId === 'new') && (
+                <>
+                  <Text style={styles.sectionLabel}>Раздел</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                    <TouchableOpacity
+                      onPress={() => { setSelectedSectionId(null); setNewSectionName(''); }}
+                      style={[styles.chip, selectedSectionId === null && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, selectedSectionId === null && styles.chipTextActive]}>Без раздела</Text>
+                    </TouchableOpacity>
+
+                    {(selectedProject?.sections ?? []).map(s => {
+                      const sid = Number(s.id);
+                      const isSelected = selectedSectionId === sid;
+                      return (
+                        <TouchableOpacity
+                          key={s.id}
+                          onPress={() => { setSelectedSectionId(sid); setNewSectionName(''); }}
+                          style={[styles.chip, isSelected && styles.chipActive]}
+                        >
+                          <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{s.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    <TouchableOpacity
+                      onPress={() => setSelectedSectionId('new')}
+                      style={[styles.chip, styles.chipNew, selectedSectionId === 'new' && styles.chipNewActive]}
+                    >
+                      <Ionicons name="add" size={14} color={selectedSectionId === 'new' ? '#0A84FF' : TEXT2} />
+                      <Text style={[styles.chipText, selectedSectionId === 'new' && { color: '#0A84FF' }]}>Новый</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+
+                  {selectedSectionId === 'new' && (
+                    <TextInput
+                      style={[styles.input, { marginTop: 6 }]}
+                      placeholder="Название нового раздела..."
+                      placeholderTextColor={MUTED}
+                      value={newSectionName}
+                      onChangeText={setNewSectionName}
+                    />
+                  )}
+                </>
               )}
             </>
           )}
@@ -478,13 +536,49 @@ export function CreateTaskModal({ visible, projects, defaultProjectId, onClose, 
             onChange={setScheduleDate}
           />
 
+          {/* ── Duration ───────────────────────────────────────────────── */}
+          <Text style={styles.sectionLabel}>Длительность</Text>
+          <View style={styles.durationRow}>
+            <Ionicons name="timer-outline" size={15} color={MUTED} />
+            <TextInput
+              style={styles.durationInput}
+              value={durationText}
+              onChangeText={t => setDurationText(t.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              placeholderTextColor={MUTED}
+              placeholder="30"
+              maxLength={4}
+            />
+            <Text style={styles.durationUnit}>мин</Text>
+            {/* Quick presets */}
+            {[15, 30, 60, 90].map(m => (
+              <TouchableOpacity
+                key={m}
+                onPress={() => setDurationText(String(m))}
+                style={[
+                  styles.durationPreset,
+                  durationText === String(m) && styles.durationPresetActive,
+                ]}
+              >
+                <Text style={[
+                  styles.durationPresetText,
+                  durationText === String(m) && styles.durationPresetTextActive,
+                ]}>
+                  {m >= 60 ? `${m / 60}ч` : `${m}м`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           {/* ── Submit ─────────────────────────────────────────────────── */}
           <TouchableOpacity
             onPress={handleSubmit}
             activeOpacity={0.85}
             style={styles.submitBtn}
           >
-            <Text style={styles.submitText}>Добавить задачу</Text>
+            <Text style={styles.submitText}>
+              {isEditMode ? 'Сохранить изменения' : 'Добавить задачу'}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -554,6 +648,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   priorityBtnText: { fontSize: 12, fontWeight: '700' },
+
+  // Duration
+  durationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: CARD2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  durationInput: {
+    color: TEXT,
+    fontSize: 16,
+    fontWeight: '600',
+    minWidth: 44,
+    textAlign: 'center',
+  },
+  durationUnit: { color: TEXT2, fontSize: 13, marginRight: 4 },
+  durationPreset: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#2C2C2E',
+  },
+  durationPresetActive: { backgroundColor: 'rgba(10,132,255,0.25)' },
+  durationPresetText: { fontSize: 12, color: TEXT2, fontWeight: '600' },
+  durationPresetTextActive: { color: '#0A84FF' },
 
   // Submit
   submitBtn: {

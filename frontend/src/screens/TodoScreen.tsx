@@ -41,6 +41,7 @@ import {
   loadGuestTodos,
   removeTaskFromTree,
   saveGuestTodos,
+  updateTaskInTree,
   type TodoProject,
   type TodosData,
   type TodoTask,
@@ -123,6 +124,7 @@ function fromApiTask(t: ApiTask): TodoTask {
     description: t.description ?? '',
     due_date: t.due_date,
     schedule_date: t.schedule_date ?? null,
+    duration_minutes: t.duration_minutes ?? 30,
     priority: t.priority as 1 | 2 | 3 | 4,
     is_completed: t.is_completed,
     created_at: t.created_at,
@@ -194,11 +196,12 @@ const ProjectChip = React.memo(function ProjectChip({
 });
 
 const TaskCard = React.memo(function TaskCard({
-  task, fading, onComplete, onDelete,
+  task, fading, onComplete, onDelete, onEdit,
 }: {
   task: TodoTask; fading: boolean;
   onComplete: (task: TodoTask) => void;
   onDelete: (task: TodoTask) => void;
+  onEdit: (task: TodoTask) => void;
 }) {
   const priorityColor = PRIORITY_COLOR[task.priority] ?? MUTED;
   const overdue = task.due_date ? isDueDateOverdue(task.due_date) : false;
@@ -216,7 +219,8 @@ const TaskCard = React.memo(function TaskCard({
         </View>
       </TouchableOpacity>
 
-      <View style={styles.taskBody}>
+      {/* Tappable body → open edit modal */}
+      <TouchableOpacity style={styles.taskBody} activeOpacity={0.7} onPress={() => onEdit(task)}>
         <Text style={[styles.taskTitle, fading && { textDecorationLine: 'line-through', color: MUTED }]} numberOfLines={2}>
           {task.title}
         </Text>
@@ -243,7 +247,7 @@ const TaskCard = React.memo(function TaskCard({
             </View>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
 
       <View style={styles.taskRight}>
         <Text style={[styles.priorityBadge, { color: PRIORITY_COLOR[task.priority] }]}>
@@ -275,6 +279,7 @@ export default function TodoScreen() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('inbox');
   const [completingIds, setCompletingIds]   = useState<Set<string>>(new Set());
   const [modalVisible, setModalVisible]     = useState(false);
+  const [editingTask, setEditingTask]       = useState<TodoTask | null>(null);
   const [viewMode, setViewMode]             = useState<ViewMode>('list');
 
   // ── Data loading ───────────────────────────────────────────────────────────
@@ -331,6 +336,7 @@ export default function TodoScreen() {
                   title: task.title, description: task.description,
                   project_id: sp.id, section_id: ss.id,
                   due_date: task.due_date, schedule_date: task.schedule_date,
+                  duration_minutes: task.duration_minutes,
                   priority: task.priority,
                 }).catch(() => {});
               }
@@ -339,7 +345,9 @@ export default function TodoScreen() {
           for (const task of project.inbox_tasks) {
             await apiCreateTask(tok, {
               title: task.title, description: task.description, project_id: sp.id,
-              due_date: task.due_date, schedule_date: task.schedule_date, priority: task.priority,
+              due_date: task.due_date, schedule_date: task.schedule_date,
+              duration_minutes: task.duration_minutes,
+              priority: task.priority,
             }).catch(() => {});
           }
         } catch {}
@@ -347,7 +355,9 @@ export default function TodoScreen() {
       for (const task of guest.inbox_tasks) {
         await apiCreateTask(tok, {
           title: task.title, description: task.description,
-          due_date: task.due_date, schedule_date: task.schedule_date, priority: task.priority,
+          due_date: task.due_date, schedule_date: task.schedule_date,
+          duration_minutes: task.duration_minutes,
+          priority: task.priority,
         }).catch(() => {});
       }
 
@@ -375,6 +385,7 @@ export default function TodoScreen() {
           section_id: payload.section_id,
           due_date: payload.due_date,
           schedule_date: payload.schedule_date,
+          duration_minutes: payload.duration_minutes,
           priority: payload.priority,
         });
 
@@ -462,6 +473,7 @@ export default function TodoScreen() {
         description: payload.description,
         due_date: payload.due_date,
         schedule_date: payload.schedule_date,
+        duration_minutes: payload.duration_minutes,
         priority: payload.priority,
         is_completed: false,
         created_at: now,
@@ -475,6 +487,53 @@ export default function TodoScreen() {
       });
     }
   }, [token, loadFromServer]);
+
+  const handleOpenEdit = useCallback((task: TodoTask) => {
+    setEditingTask(task);
+    setModalVisible(true);
+  }, []);
+
+  const handleEditTask = useCallback(async (payload: CreateTaskPayload) => {
+    if (!editingTask) return;
+    setModalVisible(false);
+    const taskId = Number(editingTask.id);
+
+    if (token && !isGuestId(editingTask.id)) {
+      try {
+        const updated = await apiUpdateTask(token, taskId, {
+          title:            payload.title,
+          description:      payload.description,
+          due_date:         payload.due_date,
+          schedule_date:    payload.schedule_date,
+          duration_minutes: payload.duration_minutes,
+          priority:         payload.priority,
+        });
+        setData(prev => updateTaskInTree(prev, fromApiTask(updated)));
+      } catch (e) {
+        if (!isSessionExpired(e)) Alert.alert('Ошибка', 'Не удалось сохранить задачу');
+      }
+    } else {
+      // Guest edit: update in local state
+      const now = new Date().toISOString();
+      const updated: TodoTask = {
+        ...editingTask,
+        title:            payload.title,
+        description:      payload.description,
+        due_date:         payload.due_date,
+        schedule_date:    payload.schedule_date,
+        duration_minutes: payload.duration_minutes,
+        priority:         payload.priority,
+        updated_at:       now,
+      };
+      setData(prev => {
+        const next = updateTaskInTree(prev, updated);
+        saveGuestTodos(next).catch(() => {});
+        return next;
+      });
+    }
+
+    setEditingTask(null);
+  }, [editingTask, token]);
 
   const handleCompleteTask = useCallback((task: TodoTask) => {
     if (completingIds.has(task.id)) return;
@@ -544,6 +603,7 @@ export default function TodoScreen() {
         fading={completingIds.has(t.id)}
         onComplete={handleCompleteTask}
         onDelete={handleDeleteTask}
+        onEdit={handleOpenEdit}
       />
     ));
   };
@@ -598,6 +658,7 @@ export default function TodoScreen() {
           tasks={allTasks}
           projects={data.projects}
           tabBarHeight={tabBarHeight}
+          onTaskPress={handleOpenEdit}
         />
       ) : (
         /* ── List mode ─────────────────────────────────────────────────── */
@@ -689,13 +750,14 @@ export default function TodoScreen() {
         <Ionicons name="add" size={28} color="#fff" />
       </TouchableOpacity>
 
-      {/* ── Create Task Modal ─────────────────────────────────────────────── */}
+      {/* ── Create / Edit Task Modal ──────────────────────────────────────── */}
       <CreateTaskModal
         visible={modalVisible}
         projects={data.projects}
         defaultProjectId={defaultModalProjectId}
-        onClose={() => setModalVisible(false)}
-        onSubmit={handleCreateTask}
+        editingTask={editingTask}
+        onClose={() => { setModalVisible(false); setEditingTask(null); }}
+        onSubmit={editingTask ? handleEditTask : handleCreateTask}
       />
     </View>
   );

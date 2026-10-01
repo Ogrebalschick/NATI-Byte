@@ -11,6 +11,7 @@ export interface ApiTask {
   description: string;
   due_date: string | null;
   schedule_date: string | null;
+  duration_minutes: number | null;
   priority: 1 | 2 | 3 | 4;
   is_completed: boolean;
   created_at: string;
@@ -51,6 +52,7 @@ export interface TaskCreatePayload {
   section_id?: number | string | null;
   due_date?: string | null;
   schedule_date?: string | null;
+  duration_minutes?: number | null;
   priority?: number;
 }
 
@@ -61,6 +63,7 @@ export interface TaskUpdatePayload {
   section_id?: number | null;
   due_date?: string | null;
   schedule_date?: string | null;
+  duration_minutes?: number | null;
   priority?: number;
   is_completed?: boolean;
 }

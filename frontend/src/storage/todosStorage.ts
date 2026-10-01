@@ -12,6 +12,7 @@ export interface TodoTask {
   description: string;
   due_date: string | null;
   schedule_date: string | null;
+  duration_minutes: number | null; // длительность в минутах (для сетки календаря)
   priority: 1 | 2 | 3 | 4;
   is_completed: boolean;
   created_at: string;
@@ -85,6 +86,20 @@ export function removeTaskFromTree(data: TodosData, taskId: string): TodosData {
         ...s,
         tasks: s.tasks.filter(t => t.id !== taskId),
       })),
+    })),
+  };
+}
+
+/** Replace a task in-place across the whole tree. */
+export function updateTaskInTree(data: TodosData, updated: TodoTask): TodosData {
+  const upd = (tasks: TodoTask[]) =>
+    tasks.map(t => (t.id === updated.id ? updated : t));
+  return {
+    inbox_tasks: upd(data.inbox_tasks),
+    projects: data.projects.map(p => ({
+      ...p,
+      inbox_tasks: upd(p.inbox_tasks),
+      sections: p.sections.map(s => ({ ...s, tasks: upd(s.tasks) })),
     })),
   };
 }
