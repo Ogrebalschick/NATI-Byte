@@ -1,5 +1,9 @@
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List
 from dotenv import load_dotenv
@@ -14,9 +18,19 @@ from notes import router as notes_router
 from facts import router as facts_router
 from todos import router as todos_router
 from notifications import router as notifications_router
+from wishes import start_magic_scheduler, stop_magic_scheduler
 
 load_dotenv()
-app = FastAPI(title="Байт Бэкенд")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_magic_scheduler()
+    try:
+        yield
+    finally:
+        await stop_magic_scheduler()
+
+app = FastAPI(title="Байт Бэкенд", lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -35,6 +49,10 @@ app.include_router(notes_router)
 app.include_router(facts_router)
 app.include_router(todos_router)
 app.include_router(notifications_router)
+
+_static_dir = Path(__file__).resolve().parent / "static"
+(_static_dir / "memes").mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 chat = GigaChat(
     credentials=os.getenv("GIGACHAT_CREDENTIALS"),

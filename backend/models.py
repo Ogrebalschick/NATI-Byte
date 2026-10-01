@@ -355,6 +355,8 @@ class TodosDataResponse(BaseModel):
 
 # Allowed values for Notification.category
 VALID_NOTIFICATION_CATEGORIES = {"tasks", "reminders", "wishes"}
+# morning = 08:00 wish, evening = 22:30 wish. Other cards leave the slot empty.
+VALID_PUSH_SLOTS = {"morning", "evening"}
 
 
 class NotificationCreate(BaseModel):
@@ -363,10 +365,14 @@ class NotificationCreate(BaseModel):
     notification into a user's feed.
 
     `category` must be one of: "tasks" | "reminders" | "wishes".
+    `image_url`, when set, must point at a file under `/static/memes/`.
+    `push_slot` marks an automatic morning or evening card.
     """
     title: str = Field(..., min_length=1, max_length=200)
     body: str = Field(default="", max_length=2000)
     category: str = Field(default="tasks")
+    image_url: Optional[str] = Field(default=None, max_length=500)
+    push_slot: Optional[str] = None
 
     @field_validator("category")
     @classmethod
@@ -375,6 +381,32 @@ class NotificationCreate(BaseModel):
         if v not in VALID_NOTIFICATION_CATEGORIES:
             raise ValueError(
                 f"category must be one of {sorted(VALID_NOTIFICATION_CATEGORIES)}, got '{v}'"
+            )
+        return v
+
+    @field_validator("image_url")
+    @classmethod
+    def _validate_image_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if ".." in v or not v.startswith("/static/memes/"):
+            raise ValueError("image_url must be a path under /static/memes/")
+        return v
+
+    @field_validator("push_slot")
+    @classmethod
+    def _validate_push_slot(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if not v:
+            return None
+        if v not in VALID_PUSH_SLOTS:
+            raise ValueError(
+                f"push_slot must be one of {sorted(VALID_PUSH_SLOTS)}, got '{v}'"
             )
         return v
 
@@ -391,6 +423,8 @@ class NotificationResponse(BaseModel):
     title: str
     body: str
     category: str
+    image_url: Optional[str] = None
+    push_slot: Optional[str] = None
     is_read: bool
     created_at: datetime
 

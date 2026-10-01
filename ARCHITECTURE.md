@@ -369,6 +369,7 @@ users (1) ──── (N) user_facts
 users (1) ──── (N) user_sessions
 users (1) ──── (N) projects ──── (N) sections ──── (N) tasks
 users (1) ──── (N) tasks  [прямая связь, tasks.user_id]
+users (1) ──── (N) notifications
 ```
 
 ---
@@ -398,6 +399,7 @@ users (1) ──── (N) tasks  [прямая связь, tasks.user_id]
 - `sessions` → `UserSession`
 - `projects` → `Project`
 - `tasks` → `Task`
+- `notifications` → `Notification`
 
 ---
 
@@ -597,16 +599,20 @@ Markdown-заметки студента с AI-категоризацией.
 | `title` | String | NOT NULL, max 200 | Заголовок уведомления (пр.: «Дедлайн по физике!») |
 | `body` | Text | NOT NULL, default="" | Тело уведомления (пр.: «Через 30 минут истекает срок сдачи РГЗ») |
 | `category` | String | NOT NULL, default="tasks", index | Категория: `tasks` \| `reminders` \| `wishes` |
+| `image_url` | String | nullable | Относительный URL картинки, например `/static/memes/cat.png`. Файл лежит в `backend/static/memes/`. Пусто, если карточка без мема |
+| `push_slot` | String | nullable, index | Слот автоматического пуша: `morning` (08:00, пожелание) \| `evening` (22:30, поддержка перед сном). `NULL` у остальных карточек |
 | `is_read` | Boolean | NOT NULL, default=False | Прочитано ли пользователем |
-| `created_at` | DateTime | NOT NULL, default=now, index | Дата создания (используется для сортировки: новейшие первые) |
+| `created_at` | DateTime | NOT NULL, default=now, index | Дата создания (используется для сортировки: новейшие первые). Хранится как naive UTC |
 
 **Категории:**
 
 | Значение | Описание |
 |----------|----------|
 | `tasks` | Напоминания о дедлайнах и просроченных задачах |
-| `reminders` | Напоминания учёбы, настроенные пользователем или планировщиком |
-| `wishes` | Мотивационные и приветственные сообщения («Доброго утра, Илья!») |
+| `reminders` | Вечерняя поддержка перед сном (слот `evening`) и прочие напоминания учёбы |
+| `wishes` | Утренние пожелания (слот `morning`): милое пожелание, предсказание или шуточный праздник |
+
+Картинки для `image_url` кладутся в `backend/static/memes/` (котики, `meme_2`, `meme_3`, `meme_5` и любые другие png/jpg/webp/gif). Сервер отдаёт каталог как `GET /static/memes/<файл>`. Имя файла в БД не хранится отдельно: в колонке лежит путь вида `/static/memes/meme_2.png`. Клиент склеивает его с origin бэкенда.
 
 **Связи:** `user` → `User` (cascade=all, delete-orphan — удаляются вместе с пользователем)
 
@@ -939,15 +945,18 @@ class TodosDataResponse(BaseModel):
 | `GET` 🔒 | `/notifications/unread-count` | — | `UnreadCountResponse` | Количество непрочитанных уведомлений для бейджа колокольчика. Быстрый запрос без загрузки тел |
 | `PATCH` 🔒 | `/notifications/{id}/read` | `NotificationUpdate` | `NotificationResponse` | Отметить одно уведомление прочитанным (или снять отметку, если `is_read=False`). 404 если не найдено или принадлежит другому пользователю |
 | `POST` 🔒 | `/notifications/read-all` | — | `{status, marked: int}` | Bulk UPDATE: отметить все непрочитанные уведомления текущего пользователя как прочитанные за один SQL-запрос. Возвращает количество затронутых строк |
+| `POST` 🔒 | `/notifications/trigger-magic` | — | `NotificationResponse` | Тестовый мгновенный пуш. Случайно вызывает `generate_morning_wish` или `generate_evening_wish` для текущего пользователя и сразу пишет карточку в ленту, не дожидаясь 08:00 / 22:30 |
 | `POST` 🔒 | `/notifications` | `NotificationCreate` | `NotificationResponse` | Создать уведомление для текущего пользователя. **Основные вызывающие:** фоновые задачи и планировщики (дедлайны, пожелания). В продакшене может быть ограничен до сервисного токена |
 
 **Схемы:**
 
 ```python
 class NotificationCreate(BaseModel):
-    title:    str   # 1–200 символов, заголовок
-    body:     str   # 0–2000 символов, тело уведомления
-    category: str   # "tasks" | "reminders" | "wishes"  (валидируется)
+    title:     str            # 1–200 символов, заголовок
+    body:      str            # 0–2000 символов, тело уведомления
+    category:  str            # "tasks" | "reminders" | "wishes"  (валидируется)
+    image_url: Optional[str]  # только путь под /static/memes/, иначе 422
+    push_slot: Optional[str]  # "morning" | "evening" | null
 
 class NotificationUpdate(BaseModel):
     is_read: bool = True   # по умолчанию True (отметить прочитанным)
@@ -958,6 +967,8 @@ class NotificationResponse(BaseModel):
     title:      str
     body:       str
     category:   str
+    image_url:  Optional[str]
+    push_slot:  Optional[str]   # "morning" | "evening" | null
     is_read:    bool
     created_at: datetime
 
@@ -970,8 +981,36 @@ class UnreadCountResponse(BaseModel):
 | `category` | Назначение |
 |------------|------------|
 | `tasks` | Просроченные дедлайны, предстоящие дедлайны (сгенерированы из таблицы tasks) |
-| `reminders` | Напоминания учёбы от планировщика или самого пользователя |
-| `wishes` | Мотивационные пожелания: «Доброго утра, Илья!», «Ты справишься!» |
+| `reminders` | Вечерняя поддержка (слот `evening`) и прочие напоминания учёбы |
+| `wishes` | Утренние пожелания, слот `morning` |
+
+---
+
+### 3.7.1 Умные пожелания (`backend/wishes.py`)
+
+Фоновая задача внутри процесса FastAPI (lifespan в `main.py`). Отдельный cron-пакет не нужен. Цикл просыпается каждые 30 секунд и смотрит локальное время **Новосибирска (UTC+7)**:
+
+| Окно | Слот | Функция | `category` | `push_slot` |
+|------|------|---------|------------|-------------|
+| 08:00–08:01 | утро | `generate_morning_wish(user_id)` | `wishes` | `morning` |
+| 22:30–22:31 | вечер | `generate_evening_wish(user_id)` | `reminders` | `evening` |
+
+Планировщик обходит всех пользователей. Если у студента уже есть карточка этого `push_slot` за текущие новосибирские сутки, второй раз за день она не создаётся. Тестовый `POST /notifications/trigger-magic` тоже пишет `push_slot`, поэтому крон в этот день повторную карточку того же слота не создаст.
+
+**Утро.** Вариация выбирается случайно, затем уходит в GigaChat вместе с `UserFact` (имя, пол, интересы):
+
+- милое пожелание на день с эмодзи;
+- предсказание («У тебя будет прекрасный день!»);
+- шуточное поздравление с неофициальным праздником (День торта, День апельсина).
+
+Погода Новосибирска берётся из Open-Meteo (`latitude=55.0415`, `longitude=82.9346`, дневной `weather_code` / вероятность и сумма осадков). Если обещают дождь, в текст добавляется: «Сегодня будет дождик. Не забудь зонтик! ☔». Сбой погоды или GigaChat не роняет задачу: карточка всё равно пишется, для модели есть короткий запасной текст.
+
+**Вечер.** Берутся задачи, у которых `due_date` или `schedule_date` попадает в текущие новосибирские сутки (в БД naive UTC, клиент шлёт `toISOString()`).
+
+- Есть задачи на сегодня и у всех `is_completed = true` → похвала вроде «Умничка! Ты выполнила все задачи на день. Отдыхай! 🌟». Род глагола GigaChat согласует с фактами.
+- Часть задач открыта, либо задач на сегодня нет → поддержка: «Я с тобой. Ты всё делаешь правильно. Обнимаю! 🤗» или предложение почитать книгу / включить спокойную музыку. Пустой список не считается «все задачи выполнены».
+
+**Картинка.** GigaChat может вернуть имя файла из `backend/static/memes/`. Сервер принимает только реальное имя из этой папки и пишет `image_url = /static/memes/<файл>`. Каталог пустой — поле остаётся `null`.
 
 ---
 
@@ -1023,7 +1062,8 @@ class UnreadCountResponse(BaseModel):
 | 42 | GET | `/notifications/unread-count` | 🔒 | notifications |
 | 43 | PATCH | `/notifications/{id}/read` | 🔒 | notifications |
 | 44 | POST | `/notifications/read-all` | 🔒 | notifications |
-| 45 | POST | `/notifications` | 🔒 | notifications |
+| 45 | POST | `/notifications/trigger-magic` | 🔒 | notifications |
+| 46 | POST | `/notifications` | 🔒 | notifications |
 
 ---
 
@@ -1059,7 +1099,9 @@ backend/
 ├── notes.py            # Роутер /notes: markdown заметки
 ├── facts.py            # Роутер /profile: AI-память студента (UserFacts)
 ├── todos.py            # Роутер /todos: таск-менеджер (Project/Section/Task)
-└── notifications.py    # Роутер /notifications: in-app уведомления (лента, бейдж, read-all)
+├── notifications.py    # Роутер /notifications: in-app уведомления (лента, бейдж, read-all, trigger-magic)
+├── wishes.py           # generate_morning_wish / generate_evening_wish, погода Новосибирска, планировщик 08:00 и 22:30
+└── static/memes/       # Картинки для Notification.image_url (котики, meme_2, meme_3, meme_5, …)
 ```
 
 ### Правило №4 — Структура фронтенда

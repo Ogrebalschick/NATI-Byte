@@ -8,6 +8,7 @@ Routes:
     GET    /notifications/unread-count      — badge count: number of unread notifications
     PATCH  /notifications/{id}/read         — mark one notification as read
     POST   /notifications/read-all          — mark every notification as read in bulk
+    POST   /notifications/trigger-magic     — instantly generate one random morning/evening card
     POST   /notifications                   — create a notification (backend / scheduler use)
 
 Lifecycle:
@@ -18,6 +19,7 @@ Lifecycle:
 Categories: "tasks" | "reminders" | "wishes"
 """
 
+import random
 from datetime import datetime
 from typing import List
 
@@ -32,6 +34,7 @@ from models import (
     NotificationUpdate,
     UnreadCountResponse,
 )
+from wishes import generate_evening_wish, generate_morning_wish
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -141,6 +144,31 @@ def mark_all_read(
     return {"status": "ok", "marked": marked}
 
 
+# ── POST /notifications/trigger-magic ─────────────────────────────────────────
+
+@router.post(
+    "/trigger-magic",
+    response_model=NotificationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def trigger_magic(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Immediately generate one random smart card (morning wish or evening support)
+    for the current user and store it in the feed.
+
+    Does not wait for 08:00 or 22:30. Intended for frontend testing.
+    A card created here still counts as today's scheduled slot, so the cron
+    will not write a second morning or evening card for the same Novosibirsk day.
+    """
+    generator = random.choice((generate_morning_wish, generate_evening_wish))
+    try:
+        return generator(current_user.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 # ── POST /notifications ───────────────────────────────────────────────────────
 
 @router.post("", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED)
@@ -164,6 +192,8 @@ def create_notification(
         title=payload.title.strip(),
         body=payload.body.strip(),
         category=payload.category,
+        image_url=payload.image_url,
+        push_slot=payload.push_slot,
         is_read=False,
         created_at=datetime.utcnow(),
     )

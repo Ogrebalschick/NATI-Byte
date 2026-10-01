@@ -220,6 +220,10 @@ class Notification(Base):
     body       = Column(Text, nullable=False, default="")
     # One of NOTIFICATION_CATEGORIES; kept as plain VARCHAR for SQLite flexibility.
     category   = Column(String, nullable=False, default="tasks", index=True)
+    # Relative URL of a meme/illustration, e.g. "/static/memes/cat.png".
+    image_url  = Column(String, nullable=True)
+    # "morning" (08:00 wishes) | "evening" (22:30 support) | NULL for other cards.
+    push_slot  = Column(String, nullable=True, index=True)
     is_read    = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
@@ -339,7 +343,8 @@ def _run_migrations() -> None:
         if "notifications" in tables:
             notif_cols = [c["name"] for c in inspector.get_columns("notifications")]
             notif_patches: dict[str, str] = {
-                # Room for future columns, e.g. action_url or expires_at.
+                "image_url": "ALTER TABLE notifications ADD COLUMN image_url VARCHAR",
+                "push_slot": "ALTER TABLE notifications ADD COLUMN push_slot VARCHAR",
             }
             for col_name, ddl in notif_patches.items():
                 if col_name not in notif_cols:
