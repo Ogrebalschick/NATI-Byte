@@ -1,1 +1,3 @@
-export { default } from '../../screens/TodoScreen';
+import TodoScreen from '../../screens/TodoScreen';
+
+export default TodoScreen;

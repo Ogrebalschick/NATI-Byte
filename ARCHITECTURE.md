@@ -24,6 +24,7 @@
 | Состояние | React Context (`AuthContext`) |
 | Хранилище на устройстве | AsyncStorage |
 | Иконки | `@expo/vector-icons` (Ionicons) |
+| Локальные пуши | `expo-notifications` ~57.0.21 |
 | Стилизация | StyleSheet (нативный RN) |
 | ИИ-чат | GigaChat (через бэкенд) |
 
@@ -45,11 +46,12 @@ frontend/src/
 │       ├── chat.tsx              # ← Вкладка «Чат» (Byte AI)
 │       ├── notes.tsx             # ← Вкладка «Заметки»
 │       └── profile/
-│           ├── _layout.tsx       # ← Stack для профиля (index + auth + facts + sessions)
+│           ├── _layout.tsx       # ← Stack для профиля (index + auth + facts + sessions + notifications)
 │           ├── index.tsx         # ← Вкладка «Профиль»
 │           ├── auth.tsx          # ← Экран авторизации внутри вкладки профиля
 │           ├── facts.tsx         # ← Экран «Память ИИ»
-│           └── sessions.tsx      # ← Экран «Активные сессии»
+│           ├── sessions.tsx      # ← Экран «Активные сессии»
+│           └── notifications.tsx # ← Экран истории уведомлений
 │
 ├── screens/                      # Логика экранов (импортируются через app/)
 │   ├── AuthScreen.tsx            # Авторизация / Регистрация
@@ -60,6 +62,7 @@ frontend/src/
 │   ├── ProfileScreen.tsx         # Профиль пользователя
 │   ├── FactsScreen.tsx           # Память ИИ (UserFacts)
 │   ├── SessionsScreen.tsx        # Активные устройства / сессии
+│   ├── NotificationsScreen.tsx   # История уведомлений (чипы категорий, группировка по датам)
 │   ├── PinLockScreen.tsx         # PIN-экран блокировки
 │   └── index.tsx                 # (barrel-экспорт экранов)
 │
@@ -67,8 +70,11 @@ frontend/src/
 │   ├── ScreenWrapper.tsx         # SafeAreaView-обёртка для всех экранов
 │   ├── DevServerModal.tsx        # Dev-инструмент: смена URL бэкенда в рантайме
 │   ├── SyncStatusBanner.tsx      # Анимированный баннер статуса синхронизации с НГТУ
-│   ├── StatusIndicator.tsx       # Глобальный бейдж: «Офлайн режим» / «Гостевой режим» (top-right)
+│   ├── StatusIndicator.tsx       # Глобальный бейдж: «Офлайн режим» / «Гостевой режим» (встраивается в TopRightChrome)
+│   ├── TopRightChrome.tsx        # Кластер правого верхнего угла: колокольчик + StatusIndicator
 │   ├── NstuImportModal.tsx       # WebView-модал для импорта из ЛК НГТУ (ciu.nstu.ru)
+│   ├── notifications/
+│   │   └── NotificationBell.tsx  # Колокольчик + dropdown превью (3 последних, «Отметить всё», переход на историю)
 │   ├── byte/
 │   │   ├── input.tsx             # Поле ввода сообщения в чате
 │   │   ├── messages.tsx          # Список сообщений чата
@@ -94,7 +100,8 @@ frontend/src/
 │       └── PinPad.tsx            # Цифровая клавиатура для ввода PIN
 │
 ├── context/
-│   └── AuthContext.tsx           # Глобальный контекст: auth, sync, сессия, 2FA
+│   ├── AuthContext.tsx           # Глобальный контекст: auth, sync, сессия, 2FA
+│   └── NotificationsContext.tsx  # Лента уведомлений, unread-count, mark-read, планирование локальных пушей
 │
 ├── api/
 │   ├── config.ts                 # URL бэкенда, порт, hydrate из AsyncStorage
@@ -103,17 +110,22 @@ frontend/src/
 │   ├── notesApi.ts               # CRUD запросы к /notes
 │   ├── subjectsApi.ts            # CRUD запросы к /subjects
 │   ├── sessionsApi.ts            # Запросы к /auth/sessions
-│   └── factsApi.ts               # Запросы к /profile/facts
+│   ├── factsApi.ts               # Запросы к /profile/facts
+│   └── notificationsApi.ts      # CRUD запросы к /notifications/*
 │
 ├── storage/
 │   ├── chatStorage.ts            # AsyncStorage: кэш чатов (per-user)
 │   ├── notesStorage.ts           # AsyncStorage: черновики заметок
 │   ├── todosStorage.ts           # AsyncStorage: оффлайн-кэш задач
 │   ├── subjectsStorage.ts        # AsyncStorage: кэш предметов/баллов
-│   └── appLockStorage.ts         # AsyncStorage: PIN-код блокировки
+│   ├── appLockStorage.ts         # AsyncStorage: PIN-код блокировки
+│   └── notificationsStorage.ts   # AsyncStorage: гостевая лента уведомлений + map taskId → local push id
 │
 ├── hooks/
 │   └── useChatSync.ts            # Хук синхронизации истории чатов с сервером
+│
+├── notifications/
+│   └── localReminders.ts         # expo-notifications: пуш за 30 мин до due_date/schedule_date
 │
 ├── types/
 │   └── subjects.ts               # TypeScript-типы для предметов/баллов
@@ -144,6 +156,7 @@ frontend/src/
 | **Авторизация** | `/(tabs)/profile/auth` или `/auth` | `screens/AuthScreen.tsx` | Регистрация (2 шага + код на почту) и вход (с опциональной 2FA). Интегрирован в ProfileScreen для гостевого режима |
 | **Память ИИ** | `/(tabs)/profile/facts` | `screens/FactsScreen.tsx` | Просмотр и удаление фактов, которые ИИ запомнил о студенте. Данные: `GET /profile/facts` |
 | **Активные сессии** | `/(tabs)/profile/sessions` | `screens/SessionsScreen.tsx` | Список всех залогиненных устройств, отзыв сессий. Данные: `GET /auth/sessions` |
+| **Уведомления** | `/(tabs)/profile/notifications` | `screens/NotificationsScreen.tsx` | Полная история уведомлений. Чипы категорий [Все / Задачи / Напоминания / Пожелания], группировка «Сегодня / Вчера / На этой неделе / Ранее». Непрочитанные — синий маркер. Тап → `PATCH /notifications/{id}/read`. Гости: AsyncStorage |
 | **PIN-блокировка** | (модал поверх всего) | `screens/PinLockScreen.tsx` | Показывается `AppLockGate` при холодном старте если PIN установлен |
 
 ---
@@ -166,6 +179,7 @@ frontend/src/
 #### Интерактивная фильтрация
 
 - Тап по карточке → `metricFilter` = ключ карточки → список задач показывает плоский отфильтрованный `filteredScopedTasks`
+- При создании/изменении задачи с `due_date` или `schedule_date` `TodoScreen` вызывает `rememberTask()` → локальный пуш за 30 минут (`expo-notifications`). Удаление и выполнение отменяют пуш через `forgetTask()`.
 - Повторный тап по активной карточке → `metricFilter = null` → обычная структура с секциями
 - Смена проекта → автоматический сброс через `useEffect(() => setMetricFilter(null), [selectedProjectId])`
 - Индикаторная строка под чипсами показывает активный фильтр + кнопку × для сброса
@@ -222,6 +236,23 @@ frontend/src/
 
 ---
 
+### 1.2.3 Локальные напоминания (`expo-notifications`)
+
+В корневом `_layout.tsx` вызывается `Notifications.setNotificationHandler`, чтобы баннер показывался и при открытом приложении (`shouldShowBanner` + `shouldShowList`, SDK 57). **Expo Go (SDK 53+):** модуль `expo-notifications` на Android бросает исключение уже при `import`. Обработчик и `scheduleNotificationAsync` регистрируются только если `Constants.executionEnvironment !== StoreClient` (dev/prod native build). В песочнице пуши — no-op.
+
+Планирование — `src/notifications/localReminders.ts`:
+
+| Событие | Действие |
+|---------|----------|
+| Создание задачи с `due_date` / `schedule_date` | Берётся более раннее из двух времён, `fireAt = target − 30 мин`. Если `fireAt` в будущем — `scheduleNotificationAsync` с `DATE`-триггером, identifier `byte-task-{id}` |
+| Изменение задачи | Старый пуш отменяется, при необходимости ставится новый |
+| Удаление / выполнение | `cancelScheduledNotificationAsync` |
+| Нет прав / web / время уже прошло | no-op |
+
+Android-канал `byte-reminders` создаётся перед запросом permissions (нужен для Android 13+). Identifier и map `taskId → notificationId` хранятся в AsyncStorage (`@byte_task_reminder_ids`).
+
+---
+
 ### 1.3 Глобальные компоненты и контексты
 
 #### `src/context/AuthContext.tsx` — Центральный контекст приложения
@@ -255,6 +286,25 @@ frontend/src/
 
 ---
 
+#### `src/context/NotificationsContext.tsx` — Лента уведомлений
+
+Оборачивает дерево внутри `AuthProvider`. Предоставляет:
+
+| Поле / метод | Назначение |
+|---|---|
+| `items` | Полный список уведомлений (сервер или гостевой AsyncStorage) |
+| `unreadCount` | Число непрочитанных для бейджа колокольчика (`GET /notifications/unread-count`) |
+| `latest` | 3 самых новых — для dropdown |
+| `refresh()` | Перезагрузка ленты (на старте, при фокусе приложения, раз в 60 с) |
+| `markRead(id)` | `PATCH /notifications/{id}/read` или локальная отметка |
+| `markAllRead()` | `POST /notifications/read-all` |
+| `rememberTask(task)` | Планирует OS-пуш за 30 мин + пишет карточку в ленту (на создании) |
+| `forgetTask(taskId)` | `cancelScheduledNotificationAsync` |
+
+Гостевой режим: лента и счётчик живут в `notificationsStorage.ts` (`@byte_notifications_guest`).
+
+---
+
 #### Общие компоненты (`src/components/`)
 
 | Компонент | Назначение |
@@ -263,7 +313,9 @@ frontend/src/
 | `SyncStatusBanner` | Абсолютно позиционированный анимированный баннер вверху экрана. Показывает состояние синхронизации с ЛК НГТУ: «Синхронизация...» / «Данные обновлены!» / «Сессия устарела» |
 | `NstuImportModal` | WebView-модал, открывающий `ciu.nstu.ru`. После логина автоматически обходит страницы ЛК (AUTO_SYNC_STEPS), извлекает текст и отправляет на `POST /sync/parse-cabinet` |
 | `DevServerModal` | Dev-инструмент (вызывается долгим тапом по вкладке «Чат»): позволяет сменить IP-адрес бэкенда без пересборки |
-| `StatusIndicator` | Глобальный бейдж состояния в правом верхнем углу (`position: absolute, right: 16, zIndex: 9999`). Показывает «Офлайн режим» (оранжевый) или «Гостевой режим» (серый). Использует `useNetInfo()` из `@react-native-community/netinfo` + `useAuth()`. Рендерится в `_layout.tsx` внутри `AppLockGate`. При online + авторизован — `return null` |
+| `StatusIndicator` | Бейдж «Офлайн режим» / «Гостевой режим». Проп `embedded` — без absolute-позиции, встраивается в `TopRightChrome`. При online + авторизован — `return null` |
+| `TopRightChrome` | Абсолютный кластер `right: 14, zIndex: 9999`: колокольчик слева, `StatusIndicator` справа. Рендерится в `_layout.tsx` |
+| `NotificationBell` | Иконка колокольчика. Красный бейдж с числом непрочитанных. Тап открывает компактный dropdown: 3 последних уведомления, «Отметить всё», «Посмотреть все уведомления» → `/profile/notifications` |
 | `AppLockGate` | При холодном старте: читает PIN из AsyncStorage, если есть — показывает `PinLockScreen` поверх всего контента |
 | `AppLockSettingsModal` | Настройка PIN в разделе «Профиль» |
 | `PinPad` | Цифровая клавиатура 3×4 для ввода PIN |
@@ -1015,13 +1067,13 @@ backend/
 - **Экраны** живут в `frontend/src/screens/` — это единственное место с логикой.
 - **Файлы в `app/`** — только тонкие re-export через `export { default } from '...'`. Логику туда не добавлять.
 - **API-запросы** оборачиваются в `src/api/http.ts → apiFetch()`, который автоматически добавляет заголовок `Authorization: Bearer <token>` и обрабатывает 401.
-- **Глобальное состояние** только через `AuthContext`. Новые контексты добавлять только при крайней необходимости.
+- **Глобальное состояние** через `AuthContext` и `NotificationsContext` (лента / колокольчик / локальные пуши). Новые контексты добавлять только при крайней необходимости.
 - **Expo SDK 57**: перед использованием любого Expo-пакета читай актуальную документацию на `https://docs.expo.dev/versions/v57.0.0/`.
 
 ### Правило №5 — Безопасность
 
 - **JWT** содержит `{sub: email, id: user_id, session_id}`. Проверка сессии в БД выполняется при **каждом** запросе через `resolve_user()` в `auth.py`.
-- **Cascade deletes:** удаление `User` автоматически удаляет все его данные (chats, notes, facts, sessions, tasks, projects, subjects). Проверяй каскады при добавлении новых FK.
+- **Cascade deletes:** удаление `User` автоматически удаляет все его данные (chats, notes, facts, sessions, tasks, projects, subjects, notifications). Проверяй каскады при добавлении новых FK.
 - **Изоляция данных:** каждый роутер проверяет `user_id == current_user.id` перед доступом к записи. Никогда не убирай эту проверку.
 
 ---

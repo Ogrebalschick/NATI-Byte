@@ -9,8 +9,9 @@ export default function ProfileLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="auth" />
-      <Stack.Screen name="facts" />
-      <Stack.Screen name="sessions" />
+        <Stack.Screen name="facts" />
+        <Stack.Screen name="sessions" />
+        <Stack.Screen name="notifications" />
     </Stack>
   );
 }

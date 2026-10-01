@@ -16,7 +16,7 @@ import { useNetInfo } from '@react-native-community/netinfo';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 
-export function StatusIndicator() {
+export function StatusIndicator({ embedded = false }: { embedded?: boolean }) {
   const { isAuthenticated } = useAuth();
   const { isConnected } = useNetInfo();
   const insets = useSafeAreaInsets();
@@ -34,8 +34,9 @@ export function StatusIndicator() {
       pointerEvents="none"
       style={[
         styles.badge,
-        // Отступ статус-бара + 12 pt зазор, чтобы не закрывать системные часы
-        { top: insets.top + 12 },
+        embedded
+          ? styles.badgeEmbedded
+          : { top: insets.top + 12, right: 16, position: 'absolute', zIndex: 9999 },
         offline ? styles.badgeOffline : styles.badgeGuest,
       ]}
     >
@@ -54,9 +55,6 @@ export function StatusIndicator() {
 
 const styles = StyleSheet.create({
   badge: {
-    position: 'absolute',
-    right: 16,
-    zIndex: 9999,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -64,6 +62,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     // Тонкая рамка вместо тяжёлой тени — соответствует стилю BYTE
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  badgeEmbedded: {
+    position: 'relative',
   },
 
   // ── Офлайн (оранжевый акцент) ─────────────────────────────────────────────

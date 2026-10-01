@@ -65,6 +65,16 @@ const GuestProfile = () => {
         <Text style={styles.signInText}>Войти в аккаунт</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.guestNotifBtn}
+        activeOpacity={0.8}
+        onPress={() => router.push('/profile/notifications')}
+      >
+        <Ionicons name="notifications-outline" size={18} color="#0A84FF" />
+        <Text style={styles.guestNotifText}>Уведомления</Text>
+        <Ionicons name="chevron-forward" size={16} color="#8e8e93" />
+      </TouchableOpacity>
+
       <Text style={styles.guestNote}>
         Локальные данные сохранятся и будут объединены с аккаунтом при входе.
       </Text>
@@ -690,6 +700,20 @@ const AuthenticatedProfile = () => {
 
         <TouchableOpacity
           style={styles.menuItem}
+          onPress={() => router.push('/profile/notifications')}
+          accessibilityRole="button"
+          accessibilityLabel="Уведомления"
+        >
+          <Ionicons name="notifications-outline" size={24} color="#fff" />
+          <View style={styles.menuTextCol}>
+            <Text style={styles.menuText}>Уведомления</Text>
+            <Text style={styles.menuSubtext}>Дедлайны, напоминания и пожелания</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
           onPress={() => router.push('/statistics')}
           accessibilityRole="button"
           accessibilityLabel="Статистика"
@@ -884,6 +908,18 @@ const styles = StyleSheet.create({
   },
   signInIcon: { marginRight: 8 },
   signInText: { fontSize: 17, fontWeight: '600', color: '#fff', letterSpacing: 0.2 },
+  guestNotifBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    alignSelf: 'stretch',
+    backgroundColor: '#1C1C1E',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  guestNotifText: { flex: 1, color: '#EBEBF5', fontSize: 16, fontWeight: '600' },
   guestNote: { fontSize: 12, color: '#636366', textAlign: 'center' },
 
   // ── Authenticated ──

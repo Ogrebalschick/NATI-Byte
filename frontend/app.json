@@ -41,6 +41,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/nstu.png",
+          "color": "#0A84FF",
+          "defaultChannel": "byte-reminders"
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",

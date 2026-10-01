@@ -52,6 +52,7 @@ import {
 } from '../storage/todosStorage';
 import { CalendarView } from '../components/todos/CalendarView';
 import { CreateTaskModal, type CreateTaskPayload } from '../components/todos/CreateTaskModal';
+import { useNotifications } from '../context/NotificationsContext';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -410,6 +411,7 @@ const metricStyles = StyleSheet.create({
 
 export default function TodoScreen() {
   const { token } = useAuth();
+  const { rememberTask, forgetTask } = useNotifications();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const prevToken = useRef<string | null>(null);
@@ -546,6 +548,7 @@ export default function TodoScreen() {
 
         const newTask = fromApiTask(created);
         setData(prev => addTaskToTree(prev, newTask));
+        void rememberTask(newTask);
 
         // If backend created a new project/section, reload the full tree to get the new IDs
         if (typeof payload.project_id === 'string' || typeof payload.section_id === 'string') {
@@ -641,8 +644,9 @@ export default function TodoScreen() {
         saveGuestTodos(next).catch(() => {});
         return next;
       });
+      void rememberTask(newTask);
     }
-  }, [token, loadFromServer]);
+  }, [token, loadFromServer, rememberTask]);
 
   const handleOpenEdit = useCallback((task: TodoTask) => {
     setEditingTask(task);
@@ -714,6 +718,7 @@ export default function TodoScreen() {
         } else {
           setData(prev => updateTaskInTree(prev, fromApiTask(updated)));
         }
+        void rememberTask(fromApiTask(updated), { writeFeed: false });
       } catch (e) {
         if (!isSessionExpired(e)) Alert.alert('Ошибка', 'Не удалось сохранить задачу');
       }
@@ -804,14 +809,16 @@ export default function TodoScreen() {
         saveGuestTodos(next).catch(() => {});
         return next;
       });
+      void rememberTask(updatedTask, { writeFeed: false });
     }
 
     setEditingTask(null);
-  }, [editingTask, token, loadFromServer]);
+  }, [editingTask, token, loadFromServer, rememberTask]);
 
   const handleCompleteTask = useCallback((task: TodoTask) => {
     if (completingIds.has(task.id)) return;
     setCompletingIds(prev => new Set([...prev, task.id]));
+    void forgetTask(task.id);
 
     setTimeout(() => {
       setData(prev => {
@@ -827,7 +834,7 @@ export default function TodoScreen() {
         if (!isSessionExpired(e)) console.warn('[Todos] Failed to complete task:', e);
       });
     }
-  }, [token, completingIds]);
+  }, [token, completingIds, forgetTask]);
 
   const handleDeleteTask = useCallback((task: TodoTask) => {
     Alert.alert('Удалить задачу?', task.title, [
@@ -835,6 +842,7 @@ export default function TodoScreen() {
       {
         text: 'Удалить', style: 'destructive',
         onPress: () => {
+          void forgetTask(task.id);
           setData(prev => {
             const next = removeTaskFromTree(prev, task.id);
             if (!token) saveGuestTodos(next).catch(() => {});
@@ -848,7 +856,7 @@ export default function TodoScreen() {
         },
       },
     ]);
-  }, [token]);
+  }, [token, forgetTask]);
 
   // ── Section management ─────────────────────────────────────────────────────
 
