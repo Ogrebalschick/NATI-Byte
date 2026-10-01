@@ -71,6 +71,8 @@ interface AuthContextType {
   markLastSync: () => Promise<void>;
   getStudentData: (types?: string[]) => Promise<StudentDataMap>;
   dismissSyncStatus: () => void;
+  /** Abort the background NSTU crawl: hide the banner and stop the hidden WebView. */
+  cancelSync: () => void;
   /** True when the signed-in user has not confirmed profile facts for 180 days. */
   showReviewBanner: boolean;
   confirmProfileReview: () => Promise<void>;
@@ -92,6 +94,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [autoSyncVisible, setAutoSyncVisible] = useState(false);
+  const autoStopRef = React.useRef<(() => void) | null>(null);
+  const syncCancelled = React.useRef(false);
   const [showReviewBanner, setShowReviewBanner] = useState(false);
   const reviewCheckId = React.useRef(0);
   const tokenRef = React.useRef<string | null>(null);
@@ -404,9 +408,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
   };
 
-  const dismissSyncStatus = () => {
+  const dismissSyncStatus = React.useCallback(() => {
     setSyncStatus('idle');
-  };
+  }, []);
+
+  const cancelSync = React.useCallback(() => {
+    syncCancelled.current = true;
+    autoStopRef.current?.();
+    setAutoSyncVisible(false);
+    setSyncStatus('idle');
+  }, []);
 
   const getStudentData = React.useCallback(async (types?: string[]): Promise<StudentDataMap> => {
     const authToken = tokenRef.current;
@@ -423,6 +434,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const startAutoSync = () => {
     if (autoSyncVisible) return;
+    syncCancelled.current = false;
     setSyncStatus('syncing');
     setAutoSyncVisible(true);
   };
@@ -510,12 +522,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [isLoading, user]);
 
   const handleAutoSyncFinished = async () => {
+    if (syncCancelled.current) return;
     await markLastSync();
+    if (syncCancelled.current) return;
     setAutoSyncVisible(false);
     setSyncStatus('success');
   };
 
   const handleAutoSyncAuthError = () => {
+    if (syncCancelled.current) return;
     setAutoSyncVisible(false);
     setSyncStatus('error_auth');
   };
@@ -544,6 +559,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         markLastSync,
         getStudentData,
         dismissSyncStatus,
+        cancelSync,
         showReviewBanner,
         confirmProfileReview,
       }}
@@ -552,6 +568,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       <NstuImportModal
         visible={autoSyncVisible}
         mode="auto-sync"
+        stopRef={autoStopRef}
         onClose={handleAutoSyncAuthError}
         onScraped={parseCabinet}
         onFinished={handleAutoSyncFinished}

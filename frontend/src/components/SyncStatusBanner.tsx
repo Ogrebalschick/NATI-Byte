@@ -5,13 +5,15 @@ import {
   Easing,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth, type SyncStatus } from '../context/AuthContext';
 
 const SUCCESS_MS = 2200;
 const ERROR_MS = 5000;
+const BAR_HEIGHT = 40;
 
 function bannerCopy(status: SyncStatus): { text: string; tone: 'sync' | 'ok' | 'err' } | null {
   if (status === 'syncing') return { text: 'Синхронизация данных с ЛК НГТУ...', tone: 'sync' };
@@ -23,44 +25,36 @@ function bannerCopy(status: SyncStatus): { text: string; tone: 'sync' | 'ok' | '
 }
 
 export const SyncStatusBanner = () => {
-  const insets = useSafeAreaInsets();
-  const { syncStatus, dismissSyncStatus } = useAuth();
+  const { syncStatus, dismissSyncStatus, cancelSync } = useAuth();
   const [shown, setShown] = useState<SyncStatus | null>(null);
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(-12)).current;
+  const height = useRef(new Animated.Value(0)).current;
   const barX = useRef(new Animated.Value(0)).current;
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  const appear = () => {
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: 0, duration: 220, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const hide = (after: () => void) => {
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 0, duration: 360, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: -10, duration: 360, useNativeDriver: true }),
-    ]).start(({ finished }) => {
-      if (finished) after();
-    });
-  };
-
   useEffect(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    loopRef.current?.stop();
+
     if (syncStatus === 'idle') {
-      loopRef.current?.stop();
-      setShown(null);
+      Animated.timing(height, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (finished) setShown(null);
+      });
       return;
     }
 
     setShown(syncStatus);
-    opacity.setValue(0);
-    translateY.setValue(-12);
-    appear();
-
-    if (hideTimer.current) clearTimeout(hideTimer.current);
+    Animated.timing(height, {
+      toValue: BAR_HEIGHT,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
 
     if (syncStatus === 'syncing') {
       barX.setValue(0);
@@ -76,99 +70,110 @@ export const SyncStatusBanner = () => {
       return;
     }
 
-    loopRef.current?.stop();
     const delay = syncStatus === 'success' ? SUCCESS_MS : ERROR_MS;
     hideTimer.current = setTimeout(() => {
-      hide(() => {
-        setShown(null);
-        dismissSyncStatus();
-      });
+      dismissSyncStatus();
     }, delay);
 
     return () => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
-  }, [syncStatus]);
+  }, [syncStatus, dismissSyncStatus, height, barX]);
 
-  const copy = shown ? bannerCopy(shown) : null;
-  if (!copy) return null;
-
+  const visibleStatus = syncStatus !== 'idle' ? syncStatus : shown;
+  const copy = visibleStatus ? bannerCopy(visibleStatus) : null;
   const toneStyle =
-    copy.tone === 'ok' ? styles.ok : copy.tone === 'err' ? styles.err : styles.sync;
+    copy?.tone === 'ok' ? styles.ok : copy?.tone === 'err' ? styles.err : styles.sync;
 
   return (
     <Animated.View
       style={[
         styles.wrap,
-        { paddingTop: insets.top + 4, opacity, transform: [{ translateY }], pointerEvents: 'none' },
+        { height, pointerEvents: copy ? 'auto' : 'none' },
       ]}
     >
-      {copy.tone === 'sync' && (
-        <View style={styles.statusTrack}>
-          <Animated.View
-            style={[
-              styles.statusFill,
-              {
-                transform: [
+      {copy ? (
+        <View style={[styles.row, toneStyle]}>
+          {copy.tone === 'sync' ? <ActivityIndicator size="small" color="#64D2FF" /> : null}
+          <Text style={[styles.text, copy.tone === 'err' && styles.errText]} numberOfLines={1}>
+            {copy.text}
+          </Text>
+          {copy.tone === 'sync' ? (
+            <TouchableOpacity
+              onPress={cancelSync}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Отменить синхронизацию"
+              style={styles.close}
+            >
+              <Ionicons name="close" size={18} color="#F2F2F7" />
+            </TouchableOpacity>
+          ) : null}
+          {copy.tone === 'sync' ? (
+            <View style={[styles.statusTrack, { pointerEvents: 'none' }]}>
+              <Animated.View
+                style={[
+                  styles.statusFill,
                   {
-                    translateX: barX.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-80, 280],
-                    }),
+                    transform: [
+                      {
+                        translateX: barX.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [-90, 320],
+                        }),
+                      },
+                    ],
                   },
-                ],
-              },
-            ]}
-          />
+                ]}
+              />
+            </View>
+          ) : null}
         </View>
-      )}
-      <View style={[styles.card, toneStyle]}>
-        {copy.tone === 'sync' && <ActivityIndicator size="small" color="#64D2FF" />}
-        <Text style={[styles.text, copy.tone === 'err' && styles.errText]}>{copy.text}</Text>
-      </View>
+      ) : null}
     </Animated.View>
   );
 };
 
 const styles = StyleSheet.create({
   wrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 50,
-    paddingHorizontal: 12,
-  },
-  statusTrack: {
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: 'rgba(100,210,255,0.18)',
     overflow: 'hidden',
-    marginBottom: 6,
+    width: '100%',
   },
-  statusFill: {
-    width: 80,
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: '#64D2FF',
-  },
-  card: {
+  row: {
+    height: BAR_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    gap: 8,
+    paddingHorizontal: 14,
   },
-  sync: { backgroundColor: 'rgba(10,132,255,0.18)' },
-  ok: { backgroundColor: 'rgba(48,209,88,0.18)' },
-  err: { backgroundColor: 'rgba(255,69,58,0.2)' },
+  sync: { backgroundColor: 'rgba(10,132,255,0.22)' },
+  ok: { backgroundColor: 'rgba(48,209,88,0.22)' },
+  err: { backgroundColor: 'rgba(255,69,58,0.24)' },
   text: {
     flex: 1,
     color: '#F2F2F7',
     fontSize: 13,
     fontWeight: '600',
-    lineHeight: 18,
   },
   errText: { color: '#FF8A84' },
+  close: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 2,
+    backgroundColor: 'rgba(100,210,255,0.18)',
+    overflow: 'hidden',
+  },
+  statusFill: {
+    width: 90,
+    height: 2,
+    backgroundColor: '#64D2FF',
+  },
 });

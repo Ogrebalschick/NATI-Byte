@@ -36,7 +36,7 @@
 frontend/src/
 │
 ├── app/                          # expo-router файловая маршрутизация
-│   ├── _layout.tsx               # ← Корневой layout (AuthProvider + AppLockGate + SyncStatusBanner). Стек: index, (tabs), auth
+│   ├── _layout.tsx               # ← Корневой layout (AuthProvider + AppLockGate). Под SafeArea: SyncStatusBanner в потоке, затем стек index / (tabs) / auth
 │   ├── index.tsx                 # ← Точка входа: <Redirect href="/(tabs)/chat" />
 │   ├── auth.tsx                  # ← Алиас: re-export из screens/AuthScreen
 │   └── (tabs)/
@@ -69,7 +69,7 @@ frontend/src/
 ├── components/
 │   ├── ScreenWrapper.tsx         # SafeAreaView-обёртка для всех экранов
 │   ├── DevServerModal.tsx        # Dev-инструмент: смена URL бэкенда в рантайме
-│   ├── SyncStatusBanner.tsx      # Анимированный баннер статуса синхронизации с НГТУ
+│   ├── SyncStatusBanner.tsx      # Плашка синхронизации в потоке layout: высота 0→40, крестик отменяет фон
 │   ├── StatusIndicator.tsx       # Глобальный бейдж: «Офлайн режим» / «Гостевой режим» (встраивается в TopRightChrome)
 │   ├── TopRightChrome.tsx        # Кластер правого верхнего угла: колокольчик + StatusIndicator
 │   ├── NstuImportModal.tsx       # WebView-модал для импорта из ЛК НГТУ (ciu.nstu.ru)
@@ -288,7 +288,8 @@ Android-канал `byte-reminders` создаётся перед запросо
 | `parseCabinet()` | `async` | Отправить текст страницы ЛК на парсинг |
 | `getStudentData()` | `async` | Получить сохранённые снапшоты ЛК |
 | `markLastSync()` | `async` | Зафиксировать время последней синхронизации |
-| `dismissSyncStatus()` | `sync` | Сбросить статус баннера синхронизации |
+| `dismissSyncStatus()` | `sync` | Сбросить статус баннера синхронизации (`success` / `error_auth` → `idle`) |
+| `cancelSync()` | `sync` | Отмена фонового синка: `syncStatus = idle`, `stopLoading()` у скрытого WebView и его размонтирование |
 | `confirmProfileReview()` | `async` | Отметить, что студент обновил факты профиля |
 
 ---
@@ -318,8 +319,8 @@ Android-канал `byte-reminders` создаётся перед запросо
 | Компонент | Назначение |
 |-----------|-----------|
 | `ScreenWrapper` | SafeAreaView-обёртка с `paddingHorizontal: 16`, тёмный фон `#17161B`. Используется на каждом экране |
-| `SyncStatusBanner` | Абсолютно позиционированный анимированный баннер вверху экрана. Показывает состояние синхронизации с ЛК НГТУ: «Синхронизация...» / «Данные обновлены!» / «Сессия устарела» |
-| `NstuImportModal` | WebView-модал, открывающий `ciu.nstu.ru`. После логина автоматически обходит страницы ЛК (AUTO_SYNC_STEPS), извлекает текст и отправляет на `POST /sync/parse-cabinet` |
+| `SyncStatusBanner` | Блок в потоке корневого `_layout.tsx` сразу под SafeArea, без `position: 'absolute'`. Высота анимируется `0 → 40`. В режиме `syncing` справа крестик: `cancelSync()` ставит `syncStatus` в `idle` и останавливает скрытый WebView (`stopLoading`, затем размонтирование). `success` и `error_auth` сами схлопываются. Пока плашка раскрыта, экраны табов сдвигаются вниз |
+| `NstuImportModal` | WebView-модал, открывающий `ciu.nstu.ru`. После логина автоматически обходит страницы ЛК (AUTO_SYNC_STEPS), извлекает текст и отправляет на `POST /sync/parse-cabinet`. Фоновый `auto-sync` живёт вне модала, за экраном; `cancelSync()` вызывает `stopLoading()` и размонтирует его |
 | `DevServerModal` | Dev-инструмент (вызывается долгим тапом по вкладке «Чат»): позволяет сменить IP-адрес бэкенда без пересборки |
 | `StatusIndicator` | Бейдж «Офлайн режим» / «Гостевой режим». Проп `embedded` — без absolute-позиции, встраивается в `TopRightChrome`. При online + авторизован — `return null` |
 | `TopRightChrome` | Абсолютный кластер `right: 14, zIndex: 9999`: колокольчик слева, `StatusIndicator` справа. Рендерится в `_layout.tsx` |

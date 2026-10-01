@@ -6,9 +6,10 @@ import 'punycode/';
 // block initial access. The auth wall lives only inside ProfileScreen.
 // AppLockGate is separate: it covers the UI on a cold start only when a device PIN is set.
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 import * as NavigationBar from 'expo-navigation-bar';
+import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppLockGate } from '../components/security/AppLockGate';
 import { AuthProvider } from '../context/AuthContext';
 import { NotificationsProvider } from '../context/NotificationsContext';
@@ -33,6 +34,9 @@ if (!isExpoGo && Platform.OS !== 'web') {
 }
 
 export default function RootLayout() {
+  const insets = useSafeAreaInsets();
+  const stackInsets = { ...insets, top: 0 };
+
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
@@ -48,16 +52,32 @@ export default function RootLayout() {
     <AuthProvider>
       <NotificationsProvider>
         <AppLockGate>
-          <Stack screenOptions={{ headerShown: false }}>
-            {/* index.tsx redirects straight to /(tabs)/chat for all users */}
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="auth" />
-          </Stack>
-          <SyncStatusBanner />
+          <View style={[styles.column, { paddingTop: insets.top }]}>
+            <SyncStatusBanner />
+            <SafeAreaInsetsContext.Provider value={stackInsets}>
+              <View style={styles.stack}>
+                <Stack screenOptions={{ headerShown: false }}>
+                  {/* index.tsx redirects straight to /(tabs)/chat for all users */}
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="(tabs)" />
+                  <Stack.Screen name="auth" />
+                </Stack>
+              </View>
+            </SafeAreaInsetsContext.Provider>
+          </View>
           <TopRightChrome />
         </AppLockGate>
       </NotificationsProvider>
     </AuthProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  column: {
+    flex: 1,
+    backgroundColor: '#17161B',
+  },
+  stack: {
+    flex: 1,
+  },
+});

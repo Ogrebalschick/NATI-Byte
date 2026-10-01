@@ -166,6 +166,8 @@ interface NstuImportModalProps {
   onScraped: (pageType: CabinetPageType, rawText: string) => Promise<void>;
   onFinished: () => void;
   onAuthError?: () => void;
+  /** Auto-sync only: parent calls this to stopLoading before the hidden WebView unmounts. */
+  stopRef?: { current: (() => void) | null };
 }
 
 export const NstuImportModal = ({
@@ -177,6 +179,7 @@ export const NstuImportModal = ({
   onScraped,
   onFinished,
   onAuthError,
+  stopRef,
 }: NstuImportModalProps) => {
   const insets = useSafeAreaInsets();
   const webRef = useRef<WebView>(null);
@@ -190,6 +193,17 @@ export const NstuImportModal = ({
   const [error, setError] = useState<string | null>(null);
 
   const isAuto = mode === 'auto-sync';
+
+  useEffect(() => {
+    if (!isAuto || !stopRef) return;
+    stopRef.current = () => {
+      phaseRef.current = 'done';
+      webRef.current?.stopLoading();
+    };
+    return () => {
+      stopRef.current = null;
+    };
+  }, [isAuto, stopRef]);
 
   useEffect(() => {
     if (visible) {
@@ -211,6 +225,7 @@ export const NstuImportModal = ({
   };
 
   const goToAutoStep = (index: number) => {
+    if (phaseRef.current === 'done') return;
     const step = AUTO_SYNC_STEPS[index];
     if (!step) {
       phaseRef.current = 'done';
@@ -225,6 +240,7 @@ export const NstuImportModal = ({
   };
 
   const handleNav = (nav: WebViewNavigation) => {
+    if (phaseRef.current === 'done') return;
     if (nav.loading) return;
     const url = nav.url || '';
     if (!url || url === 'about:blank') return;
@@ -304,6 +320,7 @@ export const NstuImportModal = ({
   };
 
   const handleMessage = async (raw: string) => {
+    if (phaseRef.current === 'done') return;
     if (sendingRef.current) return;
     let parsed: { type?: string; text?: string; email?: string } = {};
     try {
