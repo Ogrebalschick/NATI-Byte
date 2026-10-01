@@ -4,16 +4,24 @@ Task Manager router — Todoist-style to-do lists for students.
 All endpoints require a valid JWT (via get_current_user).
 
 Routes:
-    GET  /todos/data                  — full project/section/task tree
-    POST /todos/projects              — create project
-    POST /todos/sections              — create section inside a project
-    POST /todos/tasks                 — create task
-    PUT  /todos/tasks/{task_id}       — update task
-    DELETE /todos/tasks/{task_id}     — delete task
+    GET    /todos/data                 — full project/section/task tree
+    POST   /todos/projects             — create project
+    POST   /todos/sections             — create section inside a project
+    POST   /todos/tasks                — create task (project/section can be int ID or str name)
+    PUT    /todos/tasks/{task_id}      — partial update of a task
+    DELETE /todos/tasks/{task_id}      — delete a task
+
+New in this version:
+    • Task.schedule_date  — date+time when the student *plans* to work on the task
+      (distinct from due_date which is the hard deadline).
+    • TaskCreate.project_id / section_id now accept:
+        – int  → existing entity ID (ownership is verified)
+        – str  → name of a new Project / Section to create on the fly
+        – None → no project (inbox) / no section
 """
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -31,7 +39,7 @@ from models import (
 router = APIRouter(prefix="/todos", tags=["todos"])
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Low-level DB helpers ───────────────────────────────────────────────────────
 
 def _get_project_or_404(project_id: int, user_id: int, db: Session) -> Project:
     project = db.query(Project).filter(
@@ -39,7 +47,10 @@ def _get_project_or_404(project_id: int, user_id: int, db: Session) -> Project:
         Project.user_id == user_id,
     ).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Проект не найден")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Проект не найден",
+        )
     return project
 
 
@@ -49,9 +60,103 @@ def _get_task_or_404(task_id: int, user_id: int, db: Session) -> Task:
         Task.user_id == user_id,
     ).first()
     if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Задача не найдена",
+        )
     return task
 
+
+# ── Smart project / section resolution ────────────────────────────────────────
+
+def _resolve_project(
+    project_ref: Optional[Union[int, str]],
+    user_id: int,
+    db: Session,
+    default_color: str = "#6366f1",
+) -> Optional[int]:
+    """
+    Resolve *project_ref* to a concrete project_id integer.
+
+    • None → None  (task goes to global inbox)
+    • int  → verify ownership, return the same ID
+    • str  → create a new Project with that name, flush to get its ID, return it.
+             The caller must db.commit() later — flush keeps everything in one transaction.
+    """
+    if project_ref is None:
+        return None
+
+    if isinstance(project_ref, int):
+        _get_project_or_404(project_ref, user_id, db)
+        return project_ref
+
+    # ── str: create a new project on the fly ──────────────────────────────────
+    name = project_ref.strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Название проекта не должно быть пустым",
+        )
+    project = Project(user_id=user_id, name=name, color=default_color)
+    db.add(project)
+    db.flush()  # populates project.id inside the current transaction
+    return project.id
+
+
+def _resolve_section(
+    section_ref: Optional[Union[int, str]],
+    resolved_project_id: Optional[int],
+    user_id: int,
+    db: Session,
+) -> Optional[int]:
+    """
+    Resolve *section_ref* to a concrete section_id integer.
+
+    • None → None (no section)
+    • int  → verify the section belongs to one of this user's projects, return ID
+    • str  → create a new Section inside *resolved_project_id* (must not be None),
+             flush to get its ID, return it.
+    """
+    if section_ref is None:
+        return None
+
+    if isinstance(section_ref, int):
+        section = db.query(Section).filter(Section.id == section_ref).first()
+        if not section:
+            raise HTTPException(status_code=404, detail="Раздел не найден")
+        # Verify the section belongs to the current user via its project
+        _get_project_or_404(section.project_id, user_id, db)
+        return section_ref
+
+    # ── str: create a new section on the fly ──────────────────────────────────
+    if resolved_project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нельзя создать раздел без проекта — укажите project_id",
+        )
+    name = section_ref.strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Название раздела не должно быть пустым",
+        )
+    # Place the new section after all existing ones in this project
+    existing_count = (
+        db.query(Section)
+        .filter(Section.project_id == resolved_project_id)
+        .count()
+    )
+    section = Section(
+        project_id=resolved_project_id,
+        name=name,
+        position=existing_count,
+    )
+    db.add(section)
+    db.flush()  # populates section.id inside the current transaction
+    return section.id
+
+
+# ── Response serialiser ────────────────────────────────────────────────────────
 
 def _task_to_response(task: Task) -> TaskResponse:
     return TaskResponse(
@@ -62,6 +167,7 @@ def _task_to_response(task: Task) -> TaskResponse:
         title=task.title,
         description=task.description or "",
         due_date=task.due_date,
+        schedule_date=getattr(task, "schedule_date", None),  # safe for old DB rows
         priority=task.priority,
         is_completed=task.is_completed,
         created_at=task.created_at,
@@ -69,7 +175,7 @@ def _task_to_response(task: Task) -> TaskResponse:
     )
 
 
-# ── GET /todos/data ───────────────────────────────────────────────────────────
+# ── GET /todos/data ────────────────────────────────────────────────────────────
 
 @router.get("/data", response_model=TodosDataResponse)
 def get_todos_data(
@@ -78,11 +184,12 @@ def get_todos_data(
 ):
     """
     Return the complete task-manager tree for the authenticated user in one query:
-    - projects  → sections → tasks (within section)
-                → inbox_tasks (tasks in project but no section)
-    - inbox_tasks (tasks with no project at all)
+      projects → sections → tasks (within section)
+               → inbox_tasks (tasks in project but without a section)
+      inbox_tasks — tasks with no project at all.
+
+    Every task object includes both due_date and schedule_date.
     """
-    # Eagerly load sections and their tasks, plus project-level tasks
     projects = (
         db.query(Project)
         .filter(Project.user_id == current_user.id)
@@ -94,7 +201,7 @@ def get_todos_data(
         .all()
     )
 
-    # Tasks with no project (true inbox)
+    # Tasks with no project (true global inbox)
     inbox_tasks = (
         db.query(Task)
         .filter(
@@ -109,8 +216,6 @@ def get_todos_data(
     project_nodes: List[ProjectWithDataResponse] = []
     for project in projects:
         section_nodes: List[SectionWithTasksResponse] = []
-        # IDs of tasks already placed in a section
-        sectioned_task_ids: set = set()
 
         for section in sorted(project.sections, key=lambda s: s.position):
             active_section_tasks = [
@@ -118,7 +223,6 @@ def get_todos_data(
                 for t in sorted(section.tasks, key=lambda t: t.created_at)
                 if not t.is_completed
             ]
-            sectioned_task_ids.update(t.id for t in section.tasks)
             section_nodes.append(
                 SectionWithTasksResponse(
                     id=section.id,
@@ -154,7 +258,7 @@ def get_todos_data(
     )
 
 
-# ── POST /todos/projects ──────────────────────────────────────────────────────
+# ── POST /todos/projects ───────────────────────────────────────────────────────
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(
@@ -174,7 +278,7 @@ def create_project(
     return project
 
 
-# ── POST /todos/sections ──────────────────────────────────────────────────────
+# ── POST /todos/sections ───────────────────────────────────────────────────────
 
 @router.post("/sections", response_model=SectionResponse, status_code=status.HTTP_201_CREATED)
 def create_section(
@@ -182,8 +286,10 @@ def create_section(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a section inside a project that belongs to the current user."""
-    # Verify the project exists and belongs to this user
+    """
+    Create a section inside a project that belongs to the current user.
+    The project must exist and be owned by the caller.
+    """
     _get_project_or_404(payload.project_id, current_user.id, db)
 
     section = Section(
@@ -197,7 +303,7 @@ def create_section(
     return section
 
 
-# ── POST /todos/tasks ─────────────────────────────────────────────────────────
+# ── POST /todos/tasks ──────────────────────────────────────────────────────────
 
 @router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 def create_task(
@@ -206,47 +312,64 @@ def create_task(
     db: Session = Depends(get_db),
 ):
     """
-    Create a new task.
-    - If section_id is given, project_id must match the section's project.
-    - Validates that project and section (when provided) belong to the current user.
+    Create a new task. Supports on-the-fly creation of projects and sections:
+
+    project_id:
+      • int  → must exist and belong to current user
+      • str  → a new Project is created with this name (default color #6366f1)
+      • None → task lands in the global inbox
+
+    section_id:
+      • int  → must exist and belong to one of the user's projects
+      • str  → a new Section is created inside the resolved project
+               (project_id must not be None when section is a string)
+      • None → task has no section within its project
+
+    due_date      — hard deadline (крайний срок сдачи).
+    schedule_date — planned work date (когда студент планирует выполнять задачу).
+
+    All entities (project, section, task) are persisted atomically in one transaction.
     """
-    # Validate project ownership
-    if payload.project_id is not None:
-        _get_project_or_404(payload.project_id, current_user.id, db)
+    try:
+        resolved_project_id = _resolve_project(
+            payload.project_id, current_user.id, db
+        )
+        resolved_section_id = _resolve_section(
+            payload.section_id, resolved_project_id, current_user.id, db
+        )
 
-    # Validate section ownership and consistency
-    if payload.section_id is not None:
-        section = db.query(Section).filter(Section.id == payload.section_id).first()
-        if not section:
-            raise HTTPException(status_code=404, detail="Раздел не найден")
-        # Check that section belongs to the given project (or any project of this user)
-        _get_project_or_404(section.project_id, current_user.id, db)
-        if payload.project_id is not None and section.project_id != payload.project_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Раздел не принадлежит указанному проекту",
-            )
+        now = datetime.utcnow()
+        task = Task(
+            user_id=current_user.id,
+            project_id=resolved_project_id,
+            section_id=resolved_section_id,
+            title=payload.title.strip(),
+            description=payload.description or "",
+            due_date=payload.due_date,
+            schedule_date=payload.schedule_date,
+            priority=payload.priority,
+            is_completed=False,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
 
-    now = datetime.utcnow()
-    task = Task(
-        user_id=current_user.id,
-        project_id=payload.project_id,
-        section_id=payload.section_id,
-        title=payload.title.strip(),
-        description=payload.description or "",
-        due_date=payload.due_date,
-        priority=payload.priority,
-        is_completed=False,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось создать задачу",
+        ) from exc
+
     return _task_to_response(task)
 
 
-# ── PUT /todos/tasks/{task_id} ────────────────────────────────────────────────
+# ── PUT /todos/tasks/{task_id} ─────────────────────────────────────────────────
 
 @router.put("/tasks/{task_id}", response_model=TaskResponse)
 def update_task(
@@ -258,6 +381,9 @@ def update_task(
     """
     Partially update a task owned by the current user.
     Only the fields explicitly provided in the request body are changed.
+
+    To reschedule a task, pass schedule_date with a new datetime.
+    To extend the deadline, pass due_date with a new datetime.
     """
     task = _get_task_or_404(task_id, current_user.id, db)
 
@@ -267,6 +393,8 @@ def update_task(
         task.description = payload.description
     if payload.due_date is not None:
         task.due_date = payload.due_date
+    if payload.schedule_date is not None:
+        task.schedule_date = payload.schedule_date
     if payload.priority is not None:
         task.priority = payload.priority
     if payload.is_completed is not None:
@@ -282,7 +410,7 @@ def update_task(
             raise HTTPException(status_code=404, detail="Раздел не найден")
         _get_project_or_404(section.project_id, current_user.id, db)
         task.section_id = payload.section_id
-        # Auto-assign project when moving to a section
+        # Auto-assign the section's project if task has none
         if task.project_id is None:
             task.project_id = section.project_id
 
@@ -292,7 +420,7 @@ def update_task(
     return _task_to_response(task)
 
 
-# ── DELETE /todos/tasks/{task_id} ─────────────────────────────────────────────
+# ── DELETE /todos/tasks/{task_id} ──────────────────────────────────────────────
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(

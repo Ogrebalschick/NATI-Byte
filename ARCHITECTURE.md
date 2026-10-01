@@ -442,7 +442,8 @@ Markdown-заметки студента с AI-категоризацией.
 | `section_id` | Integer | FK → sections.id (ondelete=CASCADE), nullable | Секция (null = без секции) |
 | `title` | String | NOT NULL | Заголовок задачи |
 | `description` | Text | nullable, default="" | Подробное описание |
-| `due_date` | DateTime | nullable | Срок выполнения |
+| `due_date` | DateTime | nullable | **Дедлайн** — крайний срок сдачи/выполнения задачи |
+| `schedule_date` | DateTime | nullable | **Дата выполнения** — когда студент планирует работать над задачей (может не совпадать с дедлайном) |
 | `priority` | Integer | NOT NULL, default=4 | Приоритет: 1 (наивысший) … 4 (нет приоритета) |
 | `is_completed` | Boolean | NOT NULL, default=False | Выполнена ли |
 | `created_at` | DateTime | NOT NULL, default=now | Дата создания |
@@ -669,8 +670,8 @@ Todoist-подобный таск-менеджер: Проекты → Секц�
 | `GET` 🔒 | `/todos/data` | — | `TodosDataResponse` | Полное дерево данных: проекты + секции + задачи + inbox (задачи без проекта). Один запрос для всего экрана |
 | `POST` 🔒 | `/todos/projects` | `ProjectCreate` | `ProjectResponse` | Создать проект |
 | `POST` 🔒 | `/todos/sections` | `SectionCreate` | `SectionResponse` | Создать секцию внутри проекта (проект должен принадлежать текущему пользователю) |
-| `POST` 🔒 | `/todos/tasks` | `TaskCreate` | `TaskResponse` | Создать задачу. Валидирует принадлежность проекта и секции пользователю |
-| `PUT` 🔒 | `/todos/tasks/{task_id}` | `TaskUpdate` | `TaskResponse` | Частичное обновление задачи (только переданные поля). Поддерживает перемещение между проектами/секциями |
+| `POST` 🔒 | `/todos/tasks` | `TaskCreate` | `TaskResponse` | Создать задачу. `project_id`/`section_id` принимают **int** (ID) или **str** (имя — создаётся автоматически). Все сущности сохраняются в одной транзакции |
+| `PUT` 🔒 | `/todos/tasks/{task_id}` | `TaskUpdate` | `TaskResponse` | Частичное обновление задачи. Поддерживает смену `due_date`, `schedule_date`, перемещение между проектами/секциями |
 | `DELETE` 🔒 | `/todos/tasks/{task_id}` | — | 204 No Content | Удалить задачу |
 
 **Схемы:**
@@ -687,24 +688,43 @@ class SectionCreate(BaseModel):
 class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = ""
-    project_id: Optional[int] = None   # None = Входящие
-    section_id: Optional[int] = None   # None = без секции
-    due_date: Optional[datetime] = None
-    priority: int = Field(default=4, ge=1, le=4)  # 1=срочно, 4=нет приоритета
+    # Принимают int (ID) ИЛИ str (имя для создания на лету) ИЛИ None
+    project_id: Optional[Union[int, str]] = None
+    section_id: Optional[Union[int, str]] = None
+    due_date: Optional[datetime] = None       # Дедлайн (крайний срок)
+    schedule_date: Optional[datetime] = None  # Дата выполнения (планируемая)
+    priority: int = Field(default=4, ge=1, le=4)
+    # Валидатор: "5" → 5 (int), "Мат. анализ" → str, пустая строка → None
 
 class TaskUpdate(BaseModel):
     title: Optional[str]
     description: Optional[str]
-    project_id: Optional[int]
-    section_id: Optional[int]
+    project_id: Optional[int]        # только int для обновления
+    section_id: Optional[int]        # только int для обновления
     due_date: Optional[datetime]
-    priority: Optional[int]     # ge=1, le=4
+    schedule_date: Optional[datetime]
+    priority: Optional[int]          # ge=1, le=4
     is_completed: Optional[bool]
 
+class TaskResponse(BaseModel):
+    # ... все поля Task + schedule_date
+    due_date: Optional[datetime]
+    schedule_date: Optional[datetime]   # ← новое поле
+
 class TodosDataResponse(BaseModel):
-    projects: List[ProjectWithDataResponse]  # Проекты с секциями и задачами внутри
+    projects: List[ProjectWithDataResponse]  # Проекты с секциями и задачами
     inbox_tasks: List[TaskResponse]          # Задачи без проекта
 ```
+
+**Логика создания задачи на лету (str project_id/section_id):**
+
+| `project_id` | `section_id` | Поведение |
+|---|---|---|
+| `None` | `None` | Задача во Входящих |
+| `5` (int) | `None` | Задача в проекте #5, без секции |
+| `"Мат. анализ"` (str) | `None` | Создаётся Project "Мат. анализ", задача в нём |
+| `5` (int) | `"Лекции"` (str) | Создаётся Section "Лекции" в проекте #5 |
+| `"Физика"` (str) | `"1 семестр"` (str) | Создаётся Project "Физика" + Section "1 семестр" |
 
 ---
 

@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import Dict, List, Optional
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Dict, List, Optional, Union
 from datetime import datetime
 
 
@@ -222,20 +222,58 @@ class SectionResponse(BaseModel):
 
 
 class TaskCreate(BaseModel):
+    """
+    Создание задачи.
+
+    project_id / section_id принимают:
+      • int  — ID существующего проекта / раздела (проверяется право владения);
+      • str  — название нового проекта / раздела, который будет создан на лету;
+      • None — задача попадает во Входящие (без проекта / без раздела).
+
+    due_date      — крайний срок сдачи (дедлайн).
+    schedule_date — дата и время, когда студент планирует выполнить задачу.
+    """
     title: str
     description: Optional[str] = ""
-    project_id: Optional[int] = None
-    section_id: Optional[int] = None
+    project_id: Optional[Union[int, str]] = None
+    section_id: Optional[Union[int, str]] = None
     due_date: Optional[datetime] = None
+    schedule_date: Optional[datetime] = None
     priority: int = Field(default=4, ge=1, le=4)
+
+    @field_validator('project_id', 'section_id', mode='before')
+    @classmethod
+    def _coerce_id_or_name(cls, v: object) -> Optional[Union[int, str]]:
+        """
+        Привести значение к правильному типу:
+          • int / float → int (ID)
+          • str из только цифр → int (ID, переданный как строка)
+          • любая другая str → str (название для создания новой сущности)
+          • None / пустая строка → None
+        """
+        if v is None:
+            return None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return int(v)
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return None
+            try:
+                return int(stripped)
+            except ValueError:
+                return stripped
+        return v
 
 
 class TaskUpdate(BaseModel):
+    """Частичное обновление задачи. Только переданные поля изменяются."""
     title: Optional[str] = None
     description: Optional[str] = None
     project_id: Optional[int] = None
     section_id: Optional[int] = None
     due_date: Optional[datetime] = None
+    schedule_date: Optional[datetime] = None
     priority: Optional[int] = Field(default=None, ge=1, le=4)
     is_completed: Optional[bool] = None
 
@@ -248,6 +286,7 @@ class TaskResponse(BaseModel):
     title: str
     description: Optional[str] = ""
     due_date: Optional[datetime] = None
+    schedule_date: Optional[datetime] = None
     priority: int
     is_completed: bool
     created_at: datetime

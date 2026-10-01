@@ -173,7 +173,8 @@ class Task(Base):
 
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True, default="")
-    due_date = Column(DateTime, nullable=True)
+    due_date = Column(DateTime, nullable=True)       # Дедлайн (крайний срок сдачи)
+    schedule_date = Column(DateTime, nullable=True)  # Дата выполнения (когда планируется делать)
     priority = Column(Integer, nullable=False, default=4)  # 1 (highest) – 4 (lowest)
     is_completed = Column(Boolean, nullable=False, default=False)
 
@@ -268,6 +269,7 @@ def _run_migrations() -> None:
             task_patches = {
                 "description": "ALTER TABLE tasks ADD COLUMN description TEXT DEFAULT ''",
                 "due_date": "ALTER TABLE tasks ADD COLUMN due_date DATETIME",
+                "schedule_date": "ALTER TABLE tasks ADD COLUMN schedule_date DATETIME",
                 "priority": "ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 4",
                 "is_completed": "ALTER TABLE tasks ADD COLUMN is_completed BOOLEAN DEFAULT 0",
                 "project_id": "ALTER TABLE tasks ADD COLUMN project_id INTEGER",
