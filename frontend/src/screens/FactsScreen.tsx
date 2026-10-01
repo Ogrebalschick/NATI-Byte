@@ -13,6 +13,7 @@ import {
 import Animated, { FadeOut, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { deleteAllFacts, deleteFact, fetchFactGroups, updateFact, type FactGroups, type UserFact } from '../api/factsApi';
+import { isSessionExpired } from '../api/http';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { FactSwipeDeck, type SwipeDirection } from '../components/facts/FactSwipeDeck';
 import { useAuth } from '../context/AuthContext';
@@ -131,6 +132,7 @@ const FactsList = ({ token }: { token: string }) => {
     try {
       setGroups(await fetchFactGroups(token));
     } catch (err) {
+      if (isSessionExpired(err)) return;
       setError(err instanceof Error ? err.message : 'Не удалось загрузить память ИИ');
     } finally {
       setLoading(false);
@@ -164,6 +166,7 @@ const FactsList = ({ token }: { token: string }) => {
   const handleDeleteOne = (fact: UserFact) => {
     setGroups(current => withoutFact(current, fact.id));
     deleteFact(token, fact.id).catch(err => {
+      if (isSessionExpired(err)) return;
       Alert.alert('Ошибка', err instanceof Error ? err.message : 'Не удалось удалить факт');
       load();
     });
@@ -175,6 +178,7 @@ const FactsList = ({ token }: { token: string }) => {
       await deleteAllFacts(token);
       setGroups({});
     } catch (err) {
+      if (isSessionExpired(err)) return;
       Alert.alert('Ошибка', err instanceof Error ? err.message : 'Не удалось очистить память ИИ');
     } finally {
       setWiping(false);
@@ -222,6 +226,7 @@ const FactsList = ({ token }: { token: string }) => {
       })
       .catch(err => {
         setSettling(false);
+        if (isSessionExpired(err)) return;
         Alert.alert('Ошибка', err instanceof Error ? err.message : 'Не удалось удалить факт');
         replaceDeck([fact, ...deckRef.current.filter(item => item.id !== fact.id)]);
       });

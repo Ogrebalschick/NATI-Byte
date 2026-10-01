@@ -18,6 +18,7 @@ import { BarProgress } from '../components/stats/BarProgress';
 import { GradeBadge } from '../components/stats/GradeBadge';
 import { AddScoreModal, AddSubjectModal } from '../components/stats/SubjectTrackerModals';
 import { addSubjectScore, createSubject, deleteSubjectScore, fetchSubjects } from '../api/subjectsApi';
+import { isSessionExpired } from '../api/http';
 import {
   addGuestScore,
   addGuestSubject,
@@ -145,6 +146,7 @@ const StatisticsScreen = () => {
           setAchievements([]);
         }
       } catch (err: any) {
+        if (isSessionExpired(err)) return;
         setError(err.message || 'Не удалось загрузить предметы');
       } finally {
         setLoading(false);
@@ -179,6 +181,9 @@ const StatisticsScreen = () => {
         const next = addGuestSubject(subjects, input);
         await persistGuest(next);
       }
+    } catch (err) {
+      if (isSessionExpired(err)) return;
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -213,6 +218,9 @@ const StatisticsScreen = () => {
         await persistGuest(next);
         setExpanded(prev => ({ ...prev, [scoreSubject.id]: true }));
       }
+    } catch (err) {
+      if (isSessionExpired(err)) return;
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -237,6 +245,7 @@ const StatisticsScreen = () => {
       }
       await persistGuest(removeGuestScore(subjects, subjectId, scoreId));
     } catch (err: any) {
+      if (isSessionExpired(err)) return;
       setError(err.message || 'Не удалось удалить запись');
     }
   };

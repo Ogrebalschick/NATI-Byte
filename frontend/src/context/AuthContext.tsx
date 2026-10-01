@@ -1,11 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { router } from 'expo-router';
+import { API_URL } from '../api/config';
+import { apiFetch, isSessionExpired, setAuthSessionActive, setSessionExpiredHandler } from '../api/http';
+import { currentDeviceName } from '../deviceName';
 import {
   NstuImportModal,
   type CabinetPageType,
 } from '../components/NstuImportModal';
 import { clearDepartedUserChatCache } from '../storage/chatStorage';
+
+export { API_URL };
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -70,10 +75,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const API_URL =
-  Platform.OS === 'android'
-    ? 'http://192.168.50.100:8000'
-    : 'http://localhost:8000';
+function authBody(payload: Record<string, string>): string {
+  const deviceName = currentDeviceName();
+  return JSON.stringify(deviceName ? { ...payload, device_name: deviceName } : payload);
+}
 
 // ── Provider ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +92,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const reviewCheckId = React.useRef(0);
   const tokenRef = React.useRef<string | null>(null);
   const dailySyncChecked = React.useRef(false);
+  const logoutRef = React.useRef<() => Promise<void>>(async () => {});
+
+  useEffect(() => {
+    setSessionExpiredHandler(async () => {
+      await logoutRef.current();
+      router.replace('/profile/auth?notice=session_ended');
+    });
+    return () => setSessionExpiredHandler(null);
+  }, []);
 
   useEffect(() => {
     loadStoredData();
@@ -98,20 +112,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const storedUser = await AsyncStorage.getItem('@auth_user');
       if (storedToken && storedUser) {
         tokenRef.current = storedToken;
+        setAuthSessionActive(true);
         setToken(storedToken);
-        setUser(JSON.parse(storedUser));
         try {
-          const meRes = await fetch(`${API_URL}/auth/me`, {
-            headers: { Authorization: `Bearer ${storedToken}` },
-          });
+          const meRes = await apiFetch('/auth/me', {}, storedToken);
+          const cached = JSON.parse(storedUser);
           if (meRes.ok) {
             const me = await meRes.json();
-            const merged = { ...JSON.parse(storedUser), ...me };
+            const merged = { ...cached, ...me };
             setUser(merged);
             await AsyncStorage.setItem('@auth_user', JSON.stringify(merged));
+          } else {
+            setUser(cached);
           }
-        } catch {
-          // Keep cached user if /me is unreachable
+        } catch (error) {
+          if (!isSessionExpired(error)) {
+            setUser(JSON.parse(storedUser));
+          }
         }
       }
     } catch (error) {
@@ -124,6 +141,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   /** Persist token + user to memory and AsyncStorage. */
   const persistAuth = async (accessToken: string, userData: User) => {
     tokenRef.current = accessToken;
+    setAuthSessionActive(true);
     setUser(userData);
     setToken(accessToken);
     await AsyncStorage.setItem('@auth_token', accessToken);
@@ -136,7 +154,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const response = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: authBody({ email, password }),
     });
 
     if (!response.ok) {
@@ -160,7 +178,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const response = await fetch(`${API_URL}/auth/login/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, code }),
+      body: authBody({ email, code }),
     });
 
     if (!response.ok) {
@@ -192,7 +210,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const response = await fetch(`${API_URL}/auth/register/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, code }),
+      body: authBody({ email, code }),
     });
 
     if (!response.ok) {
@@ -208,6 +226,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = async () => {
     const departedUserId = user?.id ?? null;
+    setAuthSessionActive(false);
     tokenRef.current = null;
     dailySyncChecked.current = false;
     setAutoSyncVisible(false);
@@ -218,13 +237,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await AsyncStorage.multiRemove(['@auth_token', '@auth_user']);
     await clearDepartedUserChatCache(departedUserId);
   };
+  logoutRef.current = logout;
 
   const deleteAccount = async () => {
     if (!token) return;
-    await fetch(`${API_URL}/auth/delete`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    try {
+      await apiFetch('/auth/delete', { method: 'DELETE' }, token);
+    } catch (error) {
+      if (isSessionExpired(error)) return;
+    }
     await logout();
   };
 
@@ -232,14 +253,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const toggle2FA = async (enabled: boolean) => {
     if (!token) return;
-    const response = await fetch(`${API_URL}/auth/2fa`, {
+    const response = await apiFetch('/auth/2fa', {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
-    });
+    }, token);
 
     if (!response.ok) {
       const err = await response.json();
@@ -256,10 +274,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const requestPasswordReset = async () => {
     if (!token) throw new Error('Вы не авторизованы');
-    const response = await fetch(`${API_URL}/auth/password-reset/request`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await apiFetch('/auth/password-reset/request', { method: 'POST' }, token);
     if (!response.ok) {
       const err = await response.json();
       throw new Error(err.detail || 'Не удалось отправить код');
@@ -268,14 +283,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const confirmPasswordReset = async (code: string, newPassword: string) => {
     if (!token) throw new Error('Вы не авторизованы');
-    const response = await fetch(`${API_URL}/auth/password-reset/confirm`, {
+    const response = await apiFetch('/auth/password-reset/confirm', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, new_password: newPassword }),
-    });
+    }, token);
     if (!response.ok) {
       const err = await response.json();
       throw new Error(err.detail || 'Не удалось изменить пароль');
@@ -292,7 +304,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const response = await fetch(`${API_URL}/auth/nstu-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body: authBody({ email }),
     });
     if (!response.ok) {
       const err = await response.json();
@@ -308,14 +320,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const setPassword = async (newPassword: string) => {
     const authToken = tokenRef.current;
     if (!authToken) throw new Error('Вы не авторизованы');
-    const response = await fetch(`${API_URL}/auth/set-password`, {
+    const response = await apiFetch('/auth/set-password', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ new_password: newPassword }),
-    });
+    }, authToken);
     if (!response.ok) {
       const err = await response.json();
       throw new Error(err.detail || 'Не удалось установить пароль');
@@ -331,14 +340,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const parseCabinet = async (pageType: CabinetPageType, rawText: string) => {
     const authToken = tokenRef.current;
     if (!authToken) throw new Error('Вы не авторизованы');
-    const response = await fetch(`${API_URL}/sync/parse-cabinet`, {
+    const response = await apiFetch('/sync/parse-cabinet', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ page_type: pageType, raw_text: rawText }),
-    });
+    }, authToken);
     if (!response.ok) {
       const err = await response.json();
       throw new Error(err.detail || 'Не удалось разобрать страницу личного кабинета');
@@ -370,9 +376,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const authToken = tokenRef.current;
     if (!authToken) throw new Error('Вы не авторизованы');
     const query = types?.length ? `?types=${encodeURIComponent(types.join(','))}` : '';
-    const response = await fetch(`${API_URL}/sync/student-data${query}`, {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    const response = await apiFetch(`/sync/student-data${query}`, {}, authToken);
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.detail || 'Не удалось загрузить данные статистики');

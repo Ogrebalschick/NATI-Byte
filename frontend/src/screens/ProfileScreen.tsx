@@ -20,6 +20,7 @@ import { Eye, EyeOff } from 'lucide-react-native';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { AppLockSettingsModal } from '../components/security/AppLockSettingsModal';
 import { useAuth } from '../context/AuthContext';
+import { isSessionExpired } from '../api/http';
 import { NstuImportModal } from '../components/NstuImportModal';
 import { describeAppLock, getBiometricsEnabled, getUserPin } from '../storage/appLockStorage';
 
@@ -98,6 +99,7 @@ const DeleteAccountModal = ({ visible, onClose, onConfirm }: DeleteModalProps) =
       await onConfirm();
       handleClose();
     } catch (err: any) {
+      if (isSessionExpired(err)) return;
       setError(err.message || 'Не удалось удалить аккаунт');
     } finally {
       setLoading(false);
@@ -225,6 +227,7 @@ const ChangePasswordModal = ({
     try {
       await onResend();
     } catch (err: any) {
+      if (isSessionExpired(err)) return;
       setError(err.message || 'Не удалось отправить код повторно');
     }
   };
@@ -245,6 +248,7 @@ const ChangePasswordModal = ({
       resetFields();
       onClose();
     } catch (err: any) {
+      if (isSessionExpired(err)) return;
       setError(err.message || 'Не удалось изменить пароль');
     } finally {
       setLoading(false);
@@ -406,6 +410,7 @@ const CreatePasswordModal = ({ visible, onClose, onSubmit }: CreatePasswordModal
       await onSubmit(password);
       handleClose();
     } catch (err: any) {
+      if (isSessionExpired(err)) return;
       setError(err.message || 'Не удалось сохранить пароль');
     } finally {
       setLoading(false);
@@ -551,6 +556,7 @@ const AuthenticatedProfile = () => {
     try {
       await toggle2FA(value);
     } catch (err: any) {
+      if (isSessionExpired(err)) return;
       setIs2FAEnabled(!value); // rollback on error
       Alert.alert('Ошибка', err.message || 'Не удалось изменить настройку 2FA');
     } finally {
@@ -564,6 +570,7 @@ const AuthenticatedProfile = () => {
     try {
       await requestPasswordReset();
     } catch (err: any) {
+      if (isSessionExpired(err)) return;
       setShowPasswordModal(false);
       Alert.alert('Ошибка', err.message || 'Не удалось отправить код на почту');
     } finally {
@@ -717,6 +724,20 @@ const AuthenticatedProfile = () => {
           <View style={styles.menuTextCol}>
             <Text style={styles.menuText}>Защита приложения</Text>
             <Text style={styles.menuSubtext}>{appLockHint}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => router.push('/profile/sessions')}
+          accessibilityRole="button"
+          accessibilityLabel="Активные сессии"
+        >
+          <Ionicons name="phone-portrait-outline" size={24} color="#fff" />
+          <View style={styles.menuTextCol}>
+            <Text style={styles.menuText}>Активные сессии</Text>
+            <Text style={styles.menuSubtext}>Устройства, где выполнен вход</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
         </TouchableOpacity>

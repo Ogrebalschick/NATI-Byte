@@ -1,4 +1,4 @@
-import { API_URL } from '../context/AuthContext';
+import { apiFetch } from './http';
 import type { ScoreEntry, TrackedSubject } from '../types/subjects';
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -35,9 +35,7 @@ function normalizeSubject(raw: any): TrackedSubject {
 }
 
 export async function fetchSubjects(token: string): Promise<TrackedSubject[]> {
-  const response = await fetch(`${API_URL}/subjects`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await apiFetch('/subjects', {}, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось загрузить предметы'));
   const data = await response.json();
   const items = Array.isArray(data) ? data : data.items || [];
@@ -48,14 +46,11 @@ export async function createSubject(
   token: string,
   body: { name: string; max_score: number; target_score: number },
 ): Promise<TrackedSubject> {
-  const response = await fetch(`${API_URL}/subjects`, {
+  const response = await apiFetch('/subjects', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, is_custom: true }),
-  });
+  }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось создать предмет'));
   return normalizeSubject(await response.json());
 }
@@ -65,14 +60,11 @@ export async function addSubjectScore(
   subjectId: number,
   body: { score: number; description: string | null; created_at?: string },
 ): Promise<ScoreEntry> {
-  const response = await fetch(`${API_URL}/subjects/${subjectId}/scores`, {
+  const response = await apiFetch(`/subjects/${subjectId}/scores`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось добавить баллы'));
   const item = await response.json();
   return {
@@ -89,9 +81,10 @@ export async function deleteSubjectScore(
   subjectId: number,
   scoreId: number,
 ): Promise<void> {
-  const response = await fetch(`${API_URL}/subjects/${subjectId}/scores/${scoreId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await apiFetch(
+    `/subjects/${subjectId}/scores/${scoreId}`,
+    { method: 'DELETE' },
+    token,
+  );
   if (!response.ok) throw new Error(await readError(response, 'Не удалось удалить запись'));
 }

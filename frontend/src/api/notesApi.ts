@@ -1,4 +1,4 @@
-import { API_URL } from '../context/AuthContext';
+import { apiFetch } from './http';
 import type { StoredNote } from '../storage/notesStorage';
 
 export type NoteWrite = {
@@ -46,9 +46,7 @@ function normalizeNote(raw: any): StoredNote {
 }
 
 export async function fetchNotes(token: string): Promise<StoredNote[]> {
-  const response = await fetch(`${API_URL}/notes`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await apiFetch('/notes', {}, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось загрузить заметки'));
   const data = await response.json();
   const items = Array.isArray(data) ? data : data.items || [];
@@ -56,35 +54,26 @@ export async function fetchNotes(token: string): Promise<StoredNote[]> {
 }
 
 export async function createNote(token: string, body: NoteWrite): Promise<StoredNote> {
-  const response = await fetch(`${API_URL}/notes`, {
+  const response = await apiFetch('/notes', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось сохранить заметку'));
   return normalizeNote(await response.json());
 }
 
 export async function updateNote(token: string, noteId: number, body: NoteWrite): Promise<StoredNote> {
-  const response = await fetch(`${API_URL}/notes/${noteId}`, {
+  const response = await apiFetch(`/notes/${noteId}`, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось обновить заметку'));
   return normalizeNote(await response.json());
 }
 
 export async function deleteNote(token: string, noteId: number): Promise<void> {
-  const response = await fetch(`${API_URL}/notes/${noteId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await apiFetch(`/notes/${noteId}`, { method: 'DELETE' }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось удалить заметку'));
 }

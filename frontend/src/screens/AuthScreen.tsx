@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   Switch,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Eye, EyeOff, Mail, ArrowLeft } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ScreenWrapper } from '../components/ScreenWrapper';
@@ -54,11 +54,19 @@ const AuthScreen = () => {
     markLastSync,
   } = useAuth();
   const router = useRouter();
+  const { notice } = useLocalSearchParams<{ notice?: string }>();
+  const sessionEnded = notice === 'session_ended';
 
   // Don't pop the screen while the NSTU WebView is still scraping.
+  // After a revoked session, land on the profile instead of the screen that just 401'd.
   useEffect(() => {
-    if (isAuthenticated && !isWebViewVisible) router.back();
-  }, [isAuthenticated, isWebViewVisible]);
+    if (!isAuthenticated || isWebViewVisible) return;
+    if (sessionEnded) {
+      router.replace('/profile');
+      return;
+    }
+    router.back();
+  }, [isAuthenticated, isWebViewVisible, sessionEnded]);
 
   const showError = (msg: string) => setErrorMessage(msg);
   const clearError = () => setErrorMessage(null);
@@ -450,6 +458,12 @@ const AuthScreen = () => {
             </View>
           )}
 
+          {sessionEnded && (
+            <View style={styles.sessionBanner}>
+              <Text style={styles.sessionBannerText}>Сессия завершена</Text>
+            </View>
+          )}
+
           {step === 'login'            && renderLoginForm()}
           {step === 'register'         && renderRegisterForm()}
           {isVerifyStep                && renderVerifyStep()}
@@ -520,6 +534,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorBannerText: { color: '#FF453A', fontSize: 14, lineHeight: 20 },
+  sessionBanner: {
+    backgroundColor: 'rgba(255, 69, 58, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.35)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  sessionBannerText: { color: '#FF453A', fontSize: 16, fontWeight: '700', textAlign: 'center' },
   button: {
     backgroundColor: '#007AFF',
     borderRadius: 12,

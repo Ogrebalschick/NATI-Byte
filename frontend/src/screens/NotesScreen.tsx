@@ -20,6 +20,7 @@ import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createNote, deleteNote, fetchNotes, joinCategory, updateNote } from '../api/notesApi';
 import { useAuth } from '../context/AuthContext';
+import { isSessionExpired } from '../api/http';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import {
   loadCategoryCatalog,
@@ -203,7 +204,8 @@ const NotesScreen = () => {
           setCategories(collectCategories(INITIAL_CATEGORIES, [catalog, ...local.map(note => note.categories)]));
         }
       } catch (err: any) {
-        if (!cancelled) Alert.alert('Заметки', err?.message || 'Не удалось загрузить заметки');
+        if (cancelled || isSessionExpired(err)) return;
+        Alert.alert('Заметки', err?.message || 'Не удалось загрузить заметки');
       } finally {
         if (!cancelled) {
           hydrated.current = true;

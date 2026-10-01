@@ -10,6 +10,7 @@ export default function ProfileLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="auth" />
       <Stack.Screen name="facts" />
+      <Stack.Screen name="sessions" />
     </Stack>
   );
 }

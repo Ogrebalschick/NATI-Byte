@@ -1,4 +1,4 @@
-import { API_URL } from '../context/AuthContext';
+import { apiFetch } from './http';
 
 export type UserFact = {
   id: number;
@@ -35,9 +35,7 @@ function normalizeFact(raw: unknown): UserFact | null {
 }
 
 export async function fetchFactGroups(token: string): Promise<FactGroups> {
-  const response = await fetch(`${API_URL}/profile/facts`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await apiFetch('/profile/facts', {}, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось загрузить память ИИ'));
   const data = await response.json();
   const groups = data?.groups;
@@ -145,14 +143,11 @@ export function mergeFactTexts(current: string[], incoming: string[]): string[] 
 export async function createChatFacts(token: string, facts: string[]): Promise<string[]> {
   const payload = facts.map(item => item.trim()).filter(Boolean);
   if (payload.length === 0) return [];
-  const response = await fetch(`${API_URL}/profile/facts`, {
+  const response = await apiFetch('/profile/facts', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ facts: payload, source: 'chat' }),
-  });
+  }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось сохранить факты'));
   const data = await response.json();
   const created = Array.isArray(data?.created) ? data.created : [];
@@ -162,14 +157,11 @@ export async function createChatFacts(token: string, facts: string[]): Promise<s
 }
 
 export async function updateFact(token: string, factId: number, factText: string): Promise<UserFact> {
-  const response = await fetch(`${API_URL}/profile/facts/${factId}`, {
+  const response = await apiFetch(`/profile/facts/${factId}`, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fact_text: factText }),
-  });
+  }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось обновить факт'));
   const row = normalizeFact(await response.json());
   if (!row) throw new Error('Не удалось обновить факт');
@@ -177,17 +169,11 @@ export async function updateFact(token: string, factId: number, factText: string
 }
 
 export async function deleteFact(token: string, factId: number): Promise<void> {
-  const response = await fetch(`${API_URL}/profile/facts/${factId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await apiFetch(`/profile/facts/${factId}`, { method: 'DELETE' }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось удалить факт'));
 }
 
 export async function deleteAllFacts(token: string): Promise<void> {
-  const response = await fetch(`${API_URL}/profile/facts/all`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await apiFetch('/profile/facts/all', { method: 'DELETE' }, token);
   if (!response.ok) throw new Error(await readError(response, 'Не удалось очистить память ИИ'));
 }
