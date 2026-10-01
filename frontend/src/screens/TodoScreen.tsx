@@ -561,63 +561,45 @@ export default function TodoScreen() {
       let finalProjectId: string | null = null;
       let finalSectionId: string | null = null;
 
-      // Handle on-the-fly project creation for guest
+      // ── Resolve project for guest ─────────────────────────────────────────
+      // • number          → существующий серверный проект (не бывает в гостевом режиме, но обрабатываем)
+      // • строка 'g_...'  → существующий гостевой проект, используем ID напрямую
+      // • строка-имя      → создаём новый гостевой проект
+      // • null            → глобальный inbox
+      const pendingProjects: TodoProject[] = [];
+      const pendingSections: import('../storage/todosStorage').TodoSection[] = [];
+
       if (typeof payload.project_id === 'number') {
         finalProjectId = String(payload.project_id);
+      } else if (typeof payload.project_id === 'string' && isGuestId(payload.project_id)) {
+        // Существующий гостевой проект — используем как есть
+        finalProjectId = payload.project_id;
       } else if (typeof payload.project_id === 'string') {
-        // Create a guest project in local state
+        // Новое имя → создаём гостевой проект
         const newProject: TodoProject = {
-          id: guestId(),
-          name: payload.project_id,
-          color: '#6366f1',
-          created_at: now,
-          sections: [],
-          inbox_tasks: [],
+          id: guestId(), name: payload.project_id, color: '#6366f1',
+          created_at: now, sections: [], inbox_tasks: [],
         };
-        setData(prev => ({ ...prev, projects: [...prev.projects, newProject] }));
+        pendingProjects.push(newProject);
         finalProjectId = newProject.id;
-
-        // Handle on-the-fly section inside new project
-        if (typeof payload.section_id === 'string') {
-          const newSection = {
-            id: guestId(),
-            project_id: newProject.id,
-            name: payload.section_id,
-            position: 0,
-            tasks: [],
-          };
-          setData(prev => ({
-            ...prev,
-            projects: prev.projects.map(p =>
-              p.id === newProject.id
-                ? { ...p, sections: [...p.sections, newSection] }
-                : p,
-            ),
-          }));
-          finalSectionId = newSection.id;
-        }
       }
 
-      // Handle section in existing project
-      if (finalProjectId && typeof payload.section_id === 'string' && !finalSectionId) {
-        const newSection = {
-          id: guestId(),
-          project_id: finalProjectId,
-          name: payload.section_id,
-          position: 0,
-          tasks: [],
-        };
-        setData(prev => ({
-          ...prev,
-          projects: prev.projects.map(p =>
-            p.id === finalProjectId
-              ? { ...p, sections: [...p.sections, newSection] }
-              : p,
-          ),
-        }));
-        finalSectionId = newSection.id;
-      } else if (typeof payload.section_id === 'number') {
+      // ── Resolve section for guest ──────────────────────────────────────────
+      // • number          → существующий серверный раздел
+      // • строка 'g_...'  → существующий гостевой раздел
+      // • строка-имя      → создаём новый гостевой раздел внутри finalProjectId
+      // • null            → без раздела
+      if (typeof payload.section_id === 'number') {
         finalSectionId = String(payload.section_id);
+      } else if (typeof payload.section_id === 'string' && isGuestId(payload.section_id)) {
+        finalSectionId = payload.section_id;
+      } else if (typeof payload.section_id === 'string' && finalProjectId) {
+        const newSection = {
+          id: guestId(), project_id: finalProjectId,
+          name: payload.section_id, position: 0, tasks: [],
+        };
+        pendingSections.push(newSection);
+        finalSectionId = newSection.id;
       }
 
       const newTask: TodoTask = {
@@ -636,7 +618,26 @@ export default function TodoScreen() {
       };
 
       setData(prev => {
-        const next = addTaskToTree(prev, newTask);
+        let next = prev;
+
+        // Добавляем новые проекты (если создавались)
+        if (pendingProjects.length > 0) {
+          next = { ...next, projects: [...next.projects, ...pendingProjects] };
+        }
+
+        // Добавляем новые разделы в соответствующие проекты
+        if (pendingSections.length > 0) {
+          next = {
+            ...next,
+            projects: next.projects.map(p => {
+              const extra = pendingSections.filter(s => s.project_id === p.id);
+              return extra.length > 0 ? { ...p, sections: [...p.sections, ...extra] } : p;
+            }),
+          };
+        }
+
+        // Добавляем задачу в нужную позицию
+        next = addTaskToTree(next, newTask);
         saveGuestTodos(next).catch(() => {});
         return next;
       });
@@ -656,28 +657,44 @@ export default function TodoScreen() {
     if (token && !isGuestId(editingTask.id)) {
       try {
         // ── Resolve project_id ───────────────────────────────────────────────
-        // • string → создать новый проект, получить int ID
-        // • number → использовать напрямую
-        // • null   → не меняем (бэкенд не поддерживает перемещение в Inbox через PUT)
+        // • number      → существующий серверный проект (ID напрямую)
+        // • строка-цифр → существующий серверный проект (конвертируем в int)
+        // • строка-имя  → создаём новый проект на лету
+        // • null        → оставляем как есть (бэкенд не поддерживает перемещение в Inbox через PUT)
         let resolvedProjectId: number | undefined;
-        if (typeof payload.project_id === 'string') {
-          const newProj = await apiCreateProject(token, payload.project_id, '#6366f1');
-          resolvedProjectId = Number(newProj.id);
-        } else if (typeof payload.project_id === 'number') {
+        if (typeof payload.project_id === 'number') {
           resolvedProjectId = payload.project_id;
+        } else if (typeof payload.project_id === 'string') {
+          const asNum = Number(payload.project_id);
+          if (!isNaN(asNum)) {
+            // Числовая строка → существующий проект
+            resolvedProjectId = asNum;
+          } else {
+            // Нечисловая строка → новый проект
+            const newProj = await apiCreateProject(token, payload.project_id, '#6366f1');
+            resolvedProjectId = Number(newProj.id);
+          }
         }
 
         // ── Resolve section_id ───────────────────────────────────────────────
+        // Та же логика: число/числовая-строка → существующий раздел; нечисловая → новый.
         let resolvedSectionId: number | undefined;
-        if (typeof payload.section_id === 'string') {
-          const projIdForSection = resolvedProjectId
-            ?? (editingTask.project_id ? Number(editingTask.project_id) : null);
-          if (projIdForSection) {
-            const newSec = await apiCreateSection(token, projIdForSection, payload.section_id);
-            resolvedSectionId = newSec.id;
-          }
-        } else if (typeof payload.section_id === 'number') {
+        if (typeof payload.section_id === 'number') {
           resolvedSectionId = payload.section_id;
+        } else if (typeof payload.section_id === 'string') {
+          const asNum = Number(payload.section_id);
+          if (!isNaN(asNum)) {
+            // Числовая строка → существующий раздел
+            resolvedSectionId = asNum;
+          } else {
+            // Нечисловая строка → новый раздел
+            const projIdForSection = resolvedProjectId
+              ?? (editingTask.project_id ? Number(editingTask.project_id) : null);
+            if (projIdForSection) {
+              const newSec = await apiCreateSection(token, projIdForSection, payload.section_id);
+              resolvedSectionId = newSec.id;
+            }
+          }
         }
 
         const updated = await apiUpdateTask(token, taskId, {
@@ -701,9 +718,50 @@ export default function TodoScreen() {
         if (!isSessionExpired(e)) Alert.alert('Ошибка', 'Не удалось сохранить задачу');
       }
     } else {
-      // Guest edit: обновляем поля задачи на месте (перемещение между проектами не поддерживается)
+      // ── Гостевой путь ───────────────────────────────────────────────────
       const now = new Date().toISOString();
-      const updated: TodoTask = {
+
+      // Определяем целевой проект
+      let newProjectId: string | null = editingTask.project_id; // по умолчанию — тот же
+      let newProject: TodoProject | null = null;
+
+      if (payload.project_id === null) {
+        newProjectId = null; // переместить в глобальный inbox
+      } else if (typeof payload.project_id === 'string' && isGuestId(payload.project_id)) {
+        newProjectId = payload.project_id; // существующий гостевой проект
+      } else if (typeof payload.project_id === 'string') {
+        // Новое имя проекта → создаём гостевой проект
+        newProject = {
+          id: guestId(), name: payload.project_id, color: '#6366f1',
+          created_at: now, sections: [], inbox_tasks: [],
+        };
+        newProjectId = newProject.id;
+      } else if (typeof payload.project_id === 'number') {
+        newProjectId = String(payload.project_id);
+      }
+
+      // Определяем целевой раздел
+      let newSectionId: string | null = (newProjectId === editingTask.project_id)
+        ? editingTask.section_id  // по умолчанию — тот же (только если проект не сменился)
+        : null;
+      let newSection: import('../storage/todosStorage').TodoSection | null = null;
+
+      if (payload.section_id === null) {
+        newSectionId = null;
+      } else if (typeof payload.section_id === 'string' && isGuestId(payload.section_id)) {
+        newSectionId = payload.section_id; // существующий гостевой раздел
+      } else if (typeof payload.section_id === 'string' && newProjectId) {
+        // Новое имя раздела → создаём гостевой раздел в целевом проекте
+        newSection = {
+          id: guestId(), project_id: newProjectId,
+          name: payload.section_id, position: 0, tasks: [],
+        };
+        newSectionId = newSection.id;
+      } else if (typeof payload.section_id === 'number') {
+        newSectionId = String(payload.section_id);
+      }
+
+      const updatedTask: TodoTask = {
         ...editingTask,
         title:            payload.title,
         description:      payload.description,
@@ -711,10 +769,38 @@ export default function TodoScreen() {
         schedule_date:    payload.schedule_date,
         duration_minutes: payload.duration_minutes,
         priority:         payload.priority,
+        project_id:       newProjectId,
+        section_id:       newSectionId,
         updated_at:       now,
       };
+
       setData(prev => {
-        const next = updateTaskInTree(prev, updated);
+        let next = prev;
+
+        // Добавляем новый проект, если был создан
+        if (newProject) {
+          next = { ...next, projects: [...next.projects, newProject] };
+        }
+
+        // Добавляем новый раздел в проект, если был создан
+        if (newSection) {
+          const sectionCopy = newSection; // для TypeScript closure
+          next = {
+            ...next,
+            projects: next.projects.map(p =>
+              p.id === sectionCopy.project_id
+                ? { ...p, sections: [...p.sections, sectionCopy] }
+                : p,
+            ),
+          };
+        }
+
+        // Убираем задачу из старой позиции и добавляем в новую.
+        // removeTaskFromTree + addTaskToTree корректно обрабатывает и in-place обновление,
+        // и перемещение между проектами/разделами.
+        next = removeTaskFromTree(next, editingTask.id);
+        next = addTaskToTree(next, updatedTask);
+
         saveGuestTodos(next).catch(() => {});
         return next;
       });

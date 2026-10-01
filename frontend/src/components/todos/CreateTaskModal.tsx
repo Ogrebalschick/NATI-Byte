@@ -239,11 +239,13 @@ export function CreateTaskModal({
   const [durationText, setDurationText] = useState<string>('30');
 
   // ── Project selector state ─────────────────────────────────────────────────
-  const [selectedProjectId, setSelectedProjectId] = useState<number | 'new' | null>(null);
+  // Используем строковые ID (как в TodoProject.id/TodoTask.project_id),
+  // чтобы сравнение работало одинаково для серверных ('5') и гостевых ('g_xxx') ID.
+  const [selectedProjectId, setSelectedProjectId] = useState<string | 'new' | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
 
   // ── Section selector state ─────────────────────────────────────────────────
-  const [selectedSectionId, setSelectedSectionId] = useState<number | 'new' | null>(null);
+  const [selectedSectionId, setSelectedSectionId] = useState<string | 'new' | null>(null);
   const [newSectionName, setNewSectionName] = useState('');
 
   // ── Populate / reset on open ──────────────────────────────────────────────
@@ -259,11 +261,9 @@ export function CreateTaskModal({
       setScheduleDate(editingTask.schedule_date ? new Date(editingTask.schedule_date) : null);
       setDurationText(String(editingTask.duration_minutes ?? 30));
 
-      const pid = editingTask.project_id ? Number(editingTask.project_id) : null;
-      setSelectedProjectId(!isNaN(pid as number) ? pid : null);
-
-      const sid = editingTask.section_id ? Number(editingTask.section_id) : null;
-      setSelectedSectionId(!isNaN(sid as number) ? sid : null);
+      // TodoTask.project_id / section_id уже строки (или null) — используем напрямую
+      setSelectedProjectId(editingTask.project_id ?? null);
+      setSelectedSectionId(editingTask.section_id ?? null);
 
       setNewProjectName('');
       setNewSectionName('');
@@ -275,8 +275,8 @@ export function CreateTaskModal({
       setDueDate(null);
       setScheduleDate(null);
       setDurationText('30');
-      const num = defaultProjectId ? Number(defaultProjectId) : null;
-      setSelectedProjectId(num && !isNaN(num) ? num : null);
+      // defaultProjectId уже строка или null
+      setSelectedProjectId(defaultProjectId);
       setSelectedSectionId(null);
       setNewProjectName('');
       setNewSectionName('');
@@ -291,8 +291,8 @@ export function CreateTaskModal({
     setDueDate(null);
     setScheduleDate(null);
     setDurationText('30');
-    setSelectedProjectId(null);
-    setSelectedSectionId(null);
+    setSelectedProjectId(null as string | 'new' | null);
+    setSelectedSectionId(null as string | 'new' | null);
     setNewProjectName('');
     setNewSectionName('');
   }, []);
@@ -300,8 +300,10 @@ export function CreateTaskModal({
   const handleClose = () => { reset(); onClose(); };
 
   // ── Sections of selected project ──────────────────────────────────────────
-  const selectedProject = typeof selectedProjectId === 'number'
-    ? projects.find(p => Number(p.id) === selectedProjectId) ?? null
+  // selectedProjectId — строка (серверный или гостевой ID).
+  // p.id тоже строка → прямое сравнение, без Number().
+  const selectedProject = selectedProjectId !== null && selectedProjectId !== 'new'
+    ? projects.find(p => p.id === selectedProjectId) ?? null
     : null;
 
   // ── Submit ────────────────────────────────────────────────────────────────
@@ -313,19 +315,25 @@ export function CreateTaskModal({
     }
 
     // Resolve project reference
+    // • null         → Входящие (нет проекта)
+    // • 'new'        → имя нового проекта (из newProjectName)
+    // • строка числа → число (серверный проект, напр. '5' → 5)
+    // • строка 'g_…' → строка (гостевой проект, ID сохраняется)
     let projectRef: number | string | null = null;
     if (selectedProjectId === 'new' && newProjectName.trim()) {
       projectRef = newProjectName.trim();
-    } else if (typeof selectedProjectId === 'number') {
-      projectRef = selectedProjectId;
+    } else if (selectedProjectId !== null && selectedProjectId !== 'new') {
+      const asNum = Number(selectedProjectId);
+      projectRef = isNaN(asNum) ? selectedProjectId : asNum;
     }
 
-    // Resolve section reference
+    // Resolve section reference (та же логика)
     let sectionRef: number | string | null = null;
     if (selectedSectionId === 'new' && newSectionName.trim()) {
       sectionRef = newSectionName.trim();
-    } else if (typeof selectedSectionId === 'number') {
-      sectionRef = selectedSectionId;
+    } else if (selectedSectionId !== null && selectedSectionId !== 'new') {
+      const asNum = Number(selectedSectionId);
+      sectionRef = isNaN(asNum) ? selectedSectionId : asNum;
     }
 
     // Parse duration
@@ -409,12 +417,12 @@ export function CreateTaskModal({
 
               {/* Existing projects (skip virtual "all_tasks") */}
               {projects.filter(p => p.id !== 'all_tasks').map(p => {
-                const pid = Number(p.id);
-                const isSelected = selectedProjectId === pid;
+                // Прямое строковое сравнение — работает для серверных ('5') и гостевых ('g_xxx') ID
+                const isSelected = selectedProjectId === p.id;
                 return (
                   <TouchableOpacity
                     key={p.id}
-                    onPress={() => { setSelectedProjectId(pid); setSelectedSectionId(null); setNewProjectName(''); }}
+                    onPress={() => { setSelectedProjectId(p.id); setSelectedSectionId(null); setNewProjectName(''); }}
                     style={[styles.chip, isSelected && styles.chipActive]}
                   >
                     <View style={[styles.chipDot, { backgroundColor: p.color }]} />
@@ -458,12 +466,11 @@ export function CreateTaskModal({
                   </TouchableOpacity>
 
                   {(selectedProject?.sections ?? []).map(s => {
-                    const sid = Number(s.id);
-                    const isSelected = selectedSectionId === sid;
+                    const isSelected = selectedSectionId === s.id;
                     return (
                       <TouchableOpacity
                         key={s.id}
-                        onPress={() => { setSelectedSectionId(sid); setNewSectionName(''); }}
+                        onPress={() => { setSelectedSectionId(s.id); setNewSectionName(''); }}
                         style={[styles.chip, isSelected && styles.chipActive]}
                       >
                         <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{s.name}</Text>
