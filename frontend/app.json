@@ -24,7 +24,7 @@
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT"
-      ],
+      ]
     },
     "androidStatusBar": {
       "translucent": true,
