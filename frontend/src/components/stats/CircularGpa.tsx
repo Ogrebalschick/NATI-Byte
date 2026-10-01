@@ -48,7 +48,7 @@ export const CircularGpa = ({ value, size = 168, stroke = 12 }: CircularGpaProps
           />
         </G>
       </Svg>
-      <View style={styles.label} pointerEvents="none">
+      <View style={[styles.label, { pointerEvents: 'none' }]}>
         <Text style={[styles.value, { color }]}>{value == null ? '—' : value.toFixed(1)}</Text>
         <Text style={styles.caption}>
           {value == null ? 'из 5.0' : `из 5.0 (${Math.round((value / 5) * 100)}%)`}

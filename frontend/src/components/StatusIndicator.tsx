@@ -31,9 +31,9 @@ export function StatusIndicator({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <View
-      pointerEvents="none"
       style={[
         styles.badge,
+        { pointerEvents: 'none' },
         embedded
           ? styles.badgeEmbedded
           : { top: insets.top + 12, right: 16, position: 'absolute', zIndex: 9999 },

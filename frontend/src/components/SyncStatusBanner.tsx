@@ -98,10 +98,9 @@ export const SyncStatusBanner = () => {
 
   return (
     <Animated.View
-      pointerEvents="none"
       style={[
         styles.wrap,
-        { paddingTop: insets.top + 4, opacity, transform: [{ translateY }] },
+        { paddingTop: insets.top + 4, opacity, transform: [{ translateY }], pointerEvents: 'none' },
       ]}
     >
       {copy.tone === 'sync' && (

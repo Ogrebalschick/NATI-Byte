@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Eye, EyeOff } from 'lucide-react-native';
@@ -23,14 +24,36 @@ import { useAuth } from '../context/AuthContext';
 import { isSessionExpired } from '../api/http';
 import { NstuImportModal } from '../components/NstuImportModal';
 import { describeAppLock, getBiometricsEnabled, getUserPin } from '../storage/appLockStorage';
+import { DayRhythmModal } from '../components/profile/DayRhythmModal';
+import { DEFAULT_SLEEP, DEFAULT_WAKE, loadGuestDayRhythm } from '../storage/dayRhythmStorage';
 
 // ─── Guest wall ────────────────────────────────────────────────────────────────
 
 const GuestProfile = () => {
   const router = useRouter();
+  const tabBarHeight = useBottomTabBarHeight();
+  const [showDayRhythm, setShowDayRhythm] = useState(false);
+  const [rhythmHint, setRhythmHint] = useState(`${DEFAULT_WAKE} · ${DEFAULT_SLEEP}`);
+
+  useEffect(() => {
+    if (showDayRhythm) return;
+    let cancelled = false;
+    loadGuestDayRhythm()
+      .then((stored) => {
+        if (!cancelled) setRhythmHint(`${stored.wake} · ${stored.sleep}`);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [showDayRhythm]);
 
   return (
-    <View style={styles.guestContainer}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.guestContainer, { paddingBottom: tabBarHeight + 24 }]}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.guestIconWrapper}>
         <Ionicons name="cloud-outline" size={64} color="#007AFF" />
       </View>
@@ -75,10 +98,27 @@ const GuestProfile = () => {
         <Ionicons name="chevron-forward" size={16} color="#8e8e93" />
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.guestNotifBtn}
+        activeOpacity={0.8}
+        onPress={() => setShowDayRhythm(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Режим дня"
+      >
+        <Ionicons name="sunny-outline" size={18} color="#FFD60A" />
+        <View style={styles.guestRhythmCol}>
+          <Text style={styles.guestNotifText}>Режим дня</Text>
+          <Text style={styles.guestRhythmHint}>{rhythmHint}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color="#8e8e93" />
+      </TouchableOpacity>
+
+      <DayRhythmModal visible={showDayRhythm} onClose={() => setShowDayRhythm(false)} />
+
       <Text style={styles.guestNote}>
         Локальные данные сохранятся и будут объединены с аккаунтом при входе.
       </Text>
-    </View>
+    </ScrollView>
   );
 };
 
@@ -505,6 +545,7 @@ const CreatePasswordModal = ({ visible, onClose, onSubmit }: CreatePasswordModal
 const AuthenticatedProfile = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const {
     user,
     logout,
@@ -528,6 +569,7 @@ const AuthenticatedProfile = () => {
   const [is2FAEnabled, setIs2FAEnabled] = useState(user?.is_2fa_enabled ?? false);
   const [togglingFA, setTogglingFA] = useState(false);
   const [showAppLock, setShowAppLock] = useState(false);
+  const [showDayRhythm, setShowDayRhythm] = useState(false);
   const [appLockHint, setAppLockHint] = useState('PIN-код и биометрия');
   const nstuSuccessTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -621,7 +663,10 @@ const AuthenticatedProfile = () => {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.containerContent, { paddingTop: insets.top }]}
+      contentContainerStyle={[
+        styles.containerContent,
+        { paddingTop: insets.top, paddingBottom: tabBarHeight + 24 },
+      ]}
     >
       {showReviewBanner && (
         <View style={styles.reviewBanner}>
@@ -736,8 +781,24 @@ const AuthenticatedProfile = () => {
       </View>
 
       {/* Security section */}
-      <Text style={styles.sectionLabel}>БЕЗОПАСНОСТЬ</Text>
+      <Text style={styles.sectionLabel}>БЕЗОПАСНОСТЬ И НАСТРОЙКИ</Text>
       <View style={styles.menu}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => setShowDayRhythm(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Режим дня"
+        >
+          <Ionicons name="sunny-outline" size={24} color="#FFD60A" />
+          <View style={styles.menuTextCol}>
+            <Text style={styles.menuText}>Режим дня</Text>
+            <Text style={styles.menuSubtext}>
+              {user?.wake_time || DEFAULT_WAKE} · {user?.sleep_time || DEFAULT_SLEEP}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8e8e93" />
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => setShowAppLock(true)}
@@ -845,6 +906,7 @@ const AuthenticatedProfile = () => {
       />
 
       <AppLockSettingsModal visible={showAppLock} onClose={() => setShowAppLock(false)} />
+      <DayRhythmModal visible={showDayRhythm} onClose={() => setShowDayRhythm(false)} />
     </ScrollView>
   );
 };
@@ -868,11 +930,10 @@ export default ProfileScreen;
 const styles = StyleSheet.create({
   // ── Guest ──
   guestContainer: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: 'center',
-    justifyContent: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 40,
+    paddingTop: 32,
   },
   guestIconWrapper: {
     width: 112,
@@ -920,6 +981,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   guestNotifText: { flex: 1, color: '#EBEBF5', fontSize: 16, fontWeight: '600' },
+  guestRhythmCol: { flex: 1 },
+  guestRhythmHint: { color: '#8e8e93', fontSize: 12, marginTop: 2 },
   guestNote: { fontSize: 12, color: '#636366', textAlign: 'center' },
 
   // ── Authenticated ──

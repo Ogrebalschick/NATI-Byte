@@ -94,13 +94,15 @@ frontend/src/
 │   │   └── parseStats.ts         # Утилита разбора JSON успеваемости из ЛК
 │   ├── facts/
 │   │   └── FactSwipeDeck.tsx     # Swipe-карточки для просмотра/удаления фактов ИИ
+│   ├── profile/
+│   │   └── DayRhythmModal.tsx    # Тёмный шит «Режим дня»: время пробуждения и отхода ко сну
 │   └── security/
 │       ├── AppLockGate.tsx       # Ворота: при холодном старте показывает PIN-экран
 │       ├── AppLockSettingsModal.tsx  # Настройки PIN-блокировки в профиле
 │       └── PinPad.tsx            # Цифровая клавиатура для ввода PIN
 │
 ├── context/
-│   ├── AuthContext.tsx           # Глобальный контекст: auth, sync, сессия, 2FA
+│   ├── AuthContext.tsx           # Глобальный контекст: auth, sync, сессия, 2FA, режим дня
 │   └── NotificationsContext.tsx  # Лента уведомлений, unread-count, mark-read, планирование локальных пушей
 │
 ├── api/
@@ -119,13 +121,15 @@ frontend/src/
 │   ├── todosStorage.ts           # AsyncStorage: оффлайн-кэш задач
 │   ├── subjectsStorage.ts        # AsyncStorage: кэш предметов/баллов
 │   ├── appLockStorage.ts         # AsyncStorage: PIN-код блокировки
+│   ├── dayRhythmStorage.ts       # AsyncStorage: @guest_wake_time и @guest_sleep_time (ЧЧ:ММ)
 │   └── notificationsStorage.ts   # AsyncStorage: гостевая лента уведомлений + map taskId → local push id
 │
 ├── hooks/
 │   └── useChatSync.ts            # Хук синхронизации истории чатов с сервером
 │
 ├── notifications/
-│   └── localReminders.ts         # expo-notifications: пуш за 30 мин до due_date/schedule_date
+│   ├── localReminders.ts         # expo-notifications: пуш за 30 мин до due_date/schedule_date
+│   └── dayRhythm.ts              # Гостевые ежедневные пуши по @guest_wake_time / @guest_sleep_time
 │
 ├── types/
 │   └── subjects.ts               # TypeScript-типы для предметов/баллов
@@ -152,7 +156,7 @@ frontend/src/
 | **Статистика** | `/(tabs)/statistics` | `screens/StatisticsScreen.tsx` | Отображает успеваемость из ЛК НГТУ (progress, control_weeks), GPA, ручные предметы и их баллы. Данные: `GET /sync/student-data` + `GET /subjects` |
 | **Список дел** | `/(tabs)/todos` | `screens/TodoScreen.tsx` | Todoist-подобный таск-менеджер. Два режима: **Список** (проекты → разделы → задачи) и **Календарь** (Google Calendar-стиль, три вкладки с жестами навигации). В режиме «Список»: дашборд из 4 карточек-метрик (Всего / В работе / На сегодня / Выполнено) с интерактивной фильтрацией. Создание задачи: умный ввод проекта/раздела (строка = создать новый), два DateTimePicker для `due_date` и `schedule_date`, поле `duration_minutes` с пресетами. Данные: `GET /todos/data` |
 | **Заметки** | `/(tabs)/notes` | `screens/NotesScreen.tsx` | Markdown-заметки с AI-категоризацией через GigaChat. Данные: `GET /notes` |
-| **Профиль** | `/(tabs)/profile` | `screens/ProfileScreen.tsx` | Настройки аккаунта, 2FA, смена пароля, импорт из ЛК НГТУ, статус синхронизации |
+| **Профиль** | `/(tabs)/profile` | `screens/ProfileScreen.tsx` | Настройки аккаунта, 2FA, смена пароля, импорт из ЛК НГТУ, статус синхронизации. В разделе «БЕЗОПАСНОСТЬ И НАСТРОЙКИ» строка «Режим дня» открывает `DayRhythmModal`: два крупных блока «Время пробуждения» и «Время отхода ко сну». На iOS/Android тап открывает `@react-native-community/datetimepicker` (`mode="time"`, `display="spinner"`, `onValueChange` / `onDismiss`). «Сохранить» шлёт `PATCH /auth/profile/schedule` и обновляет `user.wake_time` / `user.sleep_time` в `AuthContext`. Гость видит ту же кнопку на стене профиля: часы пишутся в `@guest_wake_time` и `@guest_sleep_time`, локальные пуши ставятся на эти часы |
 | **Авторизация** | `/(tabs)/profile/auth` или `/auth` | `screens/AuthScreen.tsx` | Регистрация (2 шага + код на почту) и вход (с опциональной 2FA). Интегрирован в ProfileScreen для гостевого режима |
 | **Память ИИ** | `/(tabs)/profile/facts` | `screens/FactsScreen.tsx` | Просмотр и удаление фактов, которые ИИ запомнил о студенте. Данные: `GET /profile/facts` |
 | **Активные сессии** | `/(tabs)/profile/sessions` | `screens/SessionsScreen.tsx` | Список всех залогиненных устройств, отзыв сессий. Данные: `GET /auth/sessions` |
@@ -251,6 +255,8 @@ frontend/src/
 
 Android-канал `byte-reminders` создаётся перед запросом permissions (нужен для Android 13+). Identifier и map `taskId → notificationId` хранятся в AsyncStorage (`@byte_task_reminder_ids`).
 
+Гостевой режим дня — `src/notifications/dayRhythm.ts`. После сохранения «Режима дня» без аккаунта часы из `@guest_wake_time` и `@guest_sleep_time` ставят ежедневные локальные пуши (`DAILY`, identifiers `byte-rhythm-wake` и `byte-rhythm-sleep`, канал `byte-rhythm`). В Expo Go и на web планирование — no-op, часы всё равно остаются в AsyncStorage. У авторизованного пользователя утро и вечер шлёт серверный планировщик; сохранение расписания снимает гостевые локальные пуши, чтобы не дублировать их.
+
 ---
 
 ### 1.3 Глобальные компоненты и контексты
@@ -274,6 +280,7 @@ Android-канал `byte-reminders` создаётся перед запросо
 | `logout()` | `async` | Выход, очистка AsyncStorage |
 | `deleteAccount()` | `async` | Удаление аккаунта |
 | `toggle2FA()` | `async` | Вкл/выкл 2FA |
+| `updateDayRhythm(wake, sleep)` | `async` | `PATCH /auth/profile/schedule` со строками `ЧЧ:ММ`, запись `wake_time` / `sleep_time` в `user` и `@auth_user` |
 | `requestPasswordReset()` | `async` | Отправить код смены пароля |
 | `confirmPasswordReset()` | `async` | Подтвердить смену пароля |
 | `nstuLogin()` | `async` | Вход через НГТУ ID (без пароля BYTE) |
@@ -319,6 +326,7 @@ Android-канал `byte-reminders` создаётся перед запросо
 | `NotificationBell` | Иконка колокольчика. Красный бейдж с числом непрочитанных. Тап открывает компактный dropdown: 3 последних уведомления, «Отметить всё», «Посмотреть все уведомления» → `navigate('/profile')` и следом `push('/profile/notifications')` |
 | `AppLockGate` | При холодном старте: читает PIN из AsyncStorage, если есть — показывает `PinLockScreen` поверх всего контента |
 | `AppLockSettingsModal` | Настройка PIN в разделе «Профиль» |
+| `DayRhythmModal` | Тёмный нижний шит из «Режима дня»: крупные контрастные часы пробуждения и сна, нативное колесо времени, подпись про биоритмы, кнопка «Сохранить» |
 | `PinPad` | Цифровая клавиатура 3×4 для ввода PIN |
 
 ---

@@ -1173,10 +1173,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A84FF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.35)',
     elevation: 8,
   },
   selectionBar: {

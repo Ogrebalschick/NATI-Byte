@@ -1616,7 +1616,7 @@ const styles = StyleSheet.create({
     width: 56, height: 56, borderRadius: 28,
     backgroundColor: '#0A84FF',
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#0A84FF', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.45, shadowRadius: 10, elevation: 8,
+    boxShadow: '0px 4px 10px rgba(10, 132, 255, 0.45)',
+    elevation: 8,
   },
 });

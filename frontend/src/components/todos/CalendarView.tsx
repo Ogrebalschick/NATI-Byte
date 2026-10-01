@@ -27,7 +27,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import type { TodoTask, TodoProject } from '../../storage/todosStorage';
 
@@ -1400,10 +1400,11 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
           value={selectedDay}
           mode="date"
           display="default"
-          onChange={(_: DateTimePickerEvent, date?: Date) => {
+          onValueChange={(_event, date) => {
             setShowDatePicker(false);
-            if (date) setSelectedDay(date);
+            setSelectedDay(date);
           }}
+          onDismiss={() => setShowDatePicker(false)}
           themeVariant="dark"
         />
       )}
@@ -1428,9 +1429,10 @@ export function CalendarView({ tasks, projects, tabBarHeight, onTaskPress }: Cal
                 value={selectedDay}
                 mode="date"
                 display="inline"
-                onChange={(_: DateTimePickerEvent, date?: Date) => {
-                  if (date) setSelectedDay(date);
+                onValueChange={(_event, date) => {
+                  setSelectedDay(date);
                 }}
+                onDismiss={() => setShowDatePicker(false)}
                 themeVariant="dark"
               />
               <TouchableOpacity

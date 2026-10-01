@@ -54,7 +54,7 @@ export const CircularPercent = ({
           />
         </G>
       </Svg>
-      <View style={styles.label} pointerEvents="none">
+      <View style={[styles.label, { pointerEvents: 'none' }]}>
         <Text style={[styles.value, { color }]}>{Math.round(safe)}%</Text>
         {!!caption && <Text style={styles.caption}>{caption}</Text>}
       </View>

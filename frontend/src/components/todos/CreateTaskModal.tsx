@@ -29,7 +29,7 @@ import {
   View,
 } from 'react-native';
 import DateTimePicker, {
-  type DateTimePickerEvent,
+  type DateTimePickerChangeEvent,
 } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import type { TodoProject, TodoTask } from '../../storage/todosStorage';
@@ -101,21 +101,20 @@ function DateTimeField({ label, icon, value, accentColor, onChange }: DateTimeFi
   // iOS: show inline picker inside a small collapsible
   const [iosOpen, setIosOpen] = useState(false);
 
-  const handleAndroidChange = (e: DateTimePickerEvent, picked?: Date) => {
-    if (!picked || e.type === 'dismissed') {
-      setAndroidStep(null);
-      return;
-    }
+  const handleAndroidValue = (_event: DateTimePickerChangeEvent, picked: Date) => {
     if (androidStep === 'date') {
       setTempDate(picked);
-      setAndroidStep('time'); // next step
-    } else {
-      // combine: date from tempDate, time from picked
-      const combined = new Date(tempDate);
-      combined.setHours(picked.getHours(), picked.getMinutes(), 0, 0);
-      onChange(combined);
-      setAndroidStep(null);
+      setAndroidStep('time');
+      return;
     }
+    const combined = new Date(tempDate);
+    combined.setHours(picked.getHours(), picked.getMinutes(), 0, 0);
+    onChange(combined);
+    setAndroidStep(null);
+  };
+
+  const handleAndroidDismiss = () => {
+    setAndroidStep(null);
   };
 
   const openPicker = () => {
@@ -164,9 +163,10 @@ function DateTimeField({ label, icon, value, accentColor, onChange }: DateTimeFi
           mode="datetime"
           display="spinner"
           locale="ru-RU"
-          onChange={(_, picked) => {
-            if (picked) onChange(picked);
+          onValueChange={(_event, picked) => {
+            onChange(picked);
           }}
+          onDismiss={() => setIosOpen(false)}
           style={dtStyles.iosPicker}
           textColor={TEXT}
         />
@@ -179,7 +179,8 @@ function DateTimeField({ label, icon, value, accentColor, onChange }: DateTimeFi
           mode={androidStep}
           display="default"
           locale="ru-RU"
-          onChange={handleAndroidChange}
+          onValueChange={handleAndroidValue}
+          onDismiss={handleAndroidDismiss}
         />
       )}
     </View>

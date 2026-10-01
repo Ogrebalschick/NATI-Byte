@@ -9,6 +9,7 @@ import {
   type CabinetPageType,
 } from '../components/NstuImportModal';
 import { clearDepartedUserChatCache } from '../storage/chatStorage';
+import { cancelGuestRhythmNotifications } from '../notifications/dayRhythm';
 
 export { getApiUrl };
 
@@ -37,6 +38,8 @@ interface User {
   student_group?: string | null;
   is_synced_with_nstu?: boolean;
   has_password?: boolean;
+  wake_time?: string | null;
+  sleep_time?: string | null;
 }
 
 interface AuthContextType {
@@ -59,6 +62,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   deleteAccount: () => Promise<void>;
   toggle2FA: (enabled: boolean) => Promise<void>;
+  updateDayRhythm: (wakeTime: string, sleepTime: string) => Promise<void>;
   requestPasswordReset: () => Promise<void>;
   confirmPasswordReset: (code: string, newPassword: string) => Promise<void>;
   parseCabinet: (pageType: CabinetPageType, rawText: string) => Promise<any>;
@@ -271,6 +275,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(updated);
       await AsyncStorage.setItem('@auth_user', JSON.stringify(updated));
     }
+  };
+
+  const updateDayRhythm = async (wakeTime: string, sleepTime: string) => {
+    if (!token) throw new Error('Вы не авторизованы');
+    const response = await apiFetch('/auth/profile/schedule', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wake_time: wakeTime, sleep_time: sleepTime }),
+    }, token);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      const detail = err?.detail;
+      const message = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail) && detail[0]?.msg
+          ? String(detail[0].msg)
+          : 'Не удалось сохранить режим дня';
+      throw new Error(message);
+    }
+    const data = await response.json();
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = {
+        ...prev,
+        wake_time: typeof data.wake_time === 'string' ? data.wake_time : wakeTime,
+        sleep_time: typeof data.sleep_time === 'string' ? data.sleep_time : sleepTime,
+      };
+      AsyncStorage.setItem('@auth_user', JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
+    await cancelGuestRhythmNotifications();
   };
 
   const requestPasswordReset = async () => {
@@ -500,6 +535,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         logout,
         deleteAccount,
         toggle2FA,
+        updateDayRhythm,
         requestPasswordReset,
         confirmPasswordReset,
         parseCabinet,

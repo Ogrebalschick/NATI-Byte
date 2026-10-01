@@ -11,7 +11,7 @@ import { StatusIndicator } from './StatusIndicator';
 export function TopRightChrome() {
   const insets = useSafeAreaInsets();
   return (
-    <View pointerEvents="box-none" style={[styles.cluster, { top: insets.top + 10 }]}>
+    <View style={[styles.cluster, { top: insets.top + 10, pointerEvents: 'box-none' }]}>
       <NotificationBell />
       <StatusIndicator embedded />
     </View>

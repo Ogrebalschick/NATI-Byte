@@ -388,8 +388,10 @@ export const NstuImportModal = ({
     <WebView
       ref={webRef}
       source={{ uri: NSTU_HOME }}
-      style={isAuto ? styles.hiddenWebview : styles.webview}
-      pointerEvents={isAuto ? 'none' : 'auto'}
+      style={[
+        isAuto ? styles.hiddenWebview : styles.webview,
+        { pointerEvents: isAuto ? 'none' : 'auto' },
+      ]}
       originWhitelist={['*']}
       javaScriptEnabled
       domStorageEnabled
@@ -423,7 +425,7 @@ export const NstuImportModal = ({
     // Off-screen View (not Modal): Modal captures the whole window and blocks taps.
     // Keep a real WebView viewport so Chromium still loads pages and runs JS.
     return (
-      <View pointerEvents="none" collapsable={false} style={styles.offscreen}>
+      <View collapsable={false} style={[styles.offscreen, { pointerEvents: 'none' }]}>
         {webView}
       </View>
     );

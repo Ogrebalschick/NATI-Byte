@@ -63,9 +63,9 @@ const Input: React.FC<InputProps> = ({ onSend, disabled, extraBottom = 0, onLayo
                     {
                         opacity: buttonAnim,
                         transform: [{ scale: buttonAnim }],
+                        pointerEvents: isEntered ? 'auto' : 'none',
                     },
                 ]}
-                pointerEvents={isEntered ? 'auto' : 'none'}
             >
                 <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
                     <Ionicons name="send" size={18} color="#FFF" />

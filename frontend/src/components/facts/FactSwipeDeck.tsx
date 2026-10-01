@@ -164,7 +164,7 @@ const ConfettiBurst = () => {
   }, [pieces]);
 
   return (
-    <View pointerEvents="none" style={styles.confettiLayer}>
+    <View style={[styles.confettiLayer, { pointerEvents: 'none' }]}>
       {pieces.map((value, index) => (
         <Animated.View
           key={index}
@@ -260,11 +260,13 @@ export const FactSwipeDeck = ({ deck, done, settling = false, editing, onSwipe, 
           return (
             <View
               key={fact.id}
-              pointerEvents="none"
               style={[
                 styles.card,
                 styles.backCard,
-                { transform: [{ scale: 1 - depth * 0.045 }, { translateY: depth * 12 }] },
+                {
+                  transform: [{ scale: 1 - depth * 0.045 }, { translateY: depth * 12 }],
+                  pointerEvents: 'none',
+                },
               ]}
             >
               <FactFace fact={fact} />
@@ -356,10 +358,7 @@ const styles = StyleSheet.create({
     paddingVertical: 26,
     borderWidth: 1,
     borderColor: '#3A3A3C',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
+    boxShadow: '0px 10px 18px rgba(0, 0, 0, 0.35)',
     elevation: 8,
     justifyContent: 'center',
   },
