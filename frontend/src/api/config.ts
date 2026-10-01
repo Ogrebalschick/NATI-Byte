@@ -8,9 +8,25 @@ export const DEFAULT_API_HOST = '192.168.50.100';
 const HOST_PATTERN =
   /^(localhost|(\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)$/;
 
-/** Android phones and emulators use the computer's LAN address. iOS simulator and web use localhost. */
+/**
+ * Expo web preview renders on Node, where `window` does not exist.
+ * Native apps also have no `window`, so this flag alone is not "skip storage":
+ * iOS and Android still read AsyncStorage through the native module.
+ */
+const isServer = typeof window === 'undefined';
+
+function platformOs(): string | null {
+  try {
+    if (typeof Platform === 'undefined' || Platform == null) return null;
+    return typeof Platform.OS === 'string' ? Platform.OS : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Android phones and emulators use the computer's LAN address. Everywhere else, localhost. */
 export function defaultApiUrl(): string {
-  const host = Platform.OS === 'android' ? DEFAULT_API_HOST : 'localhost';
+  const host = platformOs() === 'android' ? DEFAULT_API_HOST : 'localhost';
   return `http://${host}:${API_PORT}`;
 }
 
@@ -60,8 +76,17 @@ export async function resetApiUrl(): Promise<void> {
   currentApiUrl = defaultApiUrl();
 }
 
+function canReadStoredHost(): boolean {
+  if (!isServer) return true;
+  const os = platformOs();
+  return os === 'ios' || os === 'android';
+}
+
 /** Load `@custom_api_ip` once. A later save or reset is not overwritten by an in-flight read. */
 export function hydrateApiUrl(): Promise<void> {
+  if (!canReadStoredHost()) {
+    return Promise.resolve();
+  }
   if (!hydratePromise) {
     const ticket = revision;
     hydratePromise = (async () => {
@@ -73,7 +98,7 @@ export function hydrateApiUrl(): Promise<void> {
         if (!isValidHost(host)) return;
         currentApiUrl = `http://${host}:${API_PORT}`;
       } catch (error) {
-        console.warn('Failed to load custom API IP', error);
+        console.error('Failed to load custom API IP', error);
       }
     })();
   }

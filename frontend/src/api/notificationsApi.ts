@@ -1,6 +1,8 @@
+import { getApiUrl } from './config';
 import { apiFetch } from './http';
 
 export type NotificationCategory = 'tasks' | 'reminders' | 'wishes';
+export type PushSlot = 'morning' | 'evening';
 
 export interface AppNotification {
   id: number | string;
@@ -8,6 +10,8 @@ export interface AppNotification {
   title: string;
   body: string;
   category: NotificationCategory;
+  image_url?: string | null;
+  push_slot?: PushSlot | null;
   is_read: boolean;
   created_at: string;
 }
@@ -33,6 +37,32 @@ function normalizeCategory(raw: unknown): NotificationCategory {
   return 'tasks';
 }
 
+function normalizePushSlot(raw: unknown): PushSlot | null {
+  if (raw === 'morning' || raw === 'evening') return raw;
+  return null;
+}
+
+/** Sun, umbrella, moon, or sleeping cat — only for Byte's own morning/evening cards. */
+export function notificationEmoji(item: Pick<AppNotification, 'category' | 'body' | 'push_slot'>): string | null {
+  const body = item.body || '';
+  if (item.category === 'wishes' || item.push_slot === 'morning') {
+    return /зонтик|дожд|☔|☂/i.test(body) ? '⛱️' : '☀️';
+  }
+  if (item.push_slot === 'evening') {
+    return /книг|музык|обнима|я с тобой|тяжел/i.test(body) ? '🐱' : '🌙';
+  }
+  return null;
+}
+
+/** Turn `/static/memes/cat.png` into an absolute URL on the current backend. */
+export function resolveNotificationImageUrl(imageUrl: string | null | undefined): string | null {
+  const raw = (imageUrl || '').trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const path = raw.startsWith('/') ? raw : `/${raw}`;
+  return `${getApiUrl()}${path}`;
+}
+
 export function normalizeNotification(raw: unknown): AppNotification | null {
   if (!raw || typeof raw !== 'object') return null;
   const row = raw as Record<string, unknown>;
@@ -44,6 +74,8 @@ export function normalizeNotification(raw: unknown): AppNotification | null {
     title: String(row.title || ''),
     body: String(row.body || ''),
     category: normalizeCategory(row.category),
+    image_url: typeof row.image_url === 'string' && row.image_url.trim() ? row.image_url.trim() : null,
+    push_slot: normalizePushSlot(row.push_slot),
     is_read: Boolean(row.is_read),
     created_at: row.created_at ? String(row.created_at) : new Date().toISOString(),
   };
@@ -89,6 +121,14 @@ export async function apiMarkAllNotificationsRead(token: string): Promise<number
   const data = await res.json().catch(() => ({}));
   const marked = Number((data as { marked?: unknown })?.marked);
   return Number.isFinite(marked) ? marked : 0;
+}
+
+export async function apiTriggerMagic(token: string): Promise<AppNotification> {
+  const res = await apiFetch('/notifications/trigger-magic', { method: 'POST' }, token);
+  if (!res.ok) throw new Error(await readError(res, 'Не удалось сгенерировать пожелание'));
+  const parsed = normalizeNotification(await res.json());
+  if (!parsed) throw new Error('Некорректный ответ сервера');
+  return parsed;
 }
 
 export async function apiCreateNotification(

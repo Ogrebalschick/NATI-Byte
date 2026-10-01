@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNotifications } from '../../context/NotificationsContext';
-import type { AppNotification, NotificationCategory } from '../../api/notificationsApi';
+import { notificationEmoji, type AppNotification, type NotificationCategory } from '../../api/notificationsApi';
 
 const CATEGORY_ICON: Record<NotificationCategory, keyof typeof Ionicons.glyphMap> = {
   tasks: 'checkbox-outline',
@@ -46,6 +46,7 @@ function PreviewRow({
   item: AppNotification;
   onPress: () => void;
 }) {
+  const emoji = notificationEmoji(item);
   return (
     <TouchableOpacity
       style={[styles.row, !item.is_read && styles.rowUnread]}
@@ -53,11 +54,15 @@ function PreviewRow({
       activeOpacity={0.72}
     >
       <View style={[styles.rowIcon, !item.is_read && styles.rowIconUnread]}>
-        <Ionicons
-          name={CATEGORY_ICON[item.category]}
-          size={15}
-          color={item.is_read ? '#8E8E93' : '#0A84FF'}
-        />
+        {emoji ? (
+          <Text style={styles.rowEmoji}>{emoji}</Text>
+        ) : (
+          <Ionicons
+            name={CATEGORY_ICON[item.category]}
+            size={15}
+            color={item.is_read ? '#8E8E93' : '#0A84FF'}
+          />
+        )}
       </View>
       <View style={styles.rowBody}>
         <Text style={[styles.rowTitle, !item.is_read && styles.rowTitleUnread]} numberOfLines={1}>
@@ -95,7 +100,10 @@ export function NotificationBell() {
 
   const goAll = () => {
     closeMenu();
-    setTimeout(() => router.push('/profile/notifications'), 80);
+    router.navigate('/profile');
+    setTimeout(() => {
+      router.push('/profile/notifications');
+    }, 50);
   };
 
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -248,6 +256,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   rowIconUnread: { backgroundColor: 'rgba(10,132,255,0.18)' },
+  rowEmoji: { fontSize: 14, lineHeight: 18 },
   rowBody: { flex: 1 },
   rowTitle: { color: '#8E8E93', fontSize: 13, fontWeight: '600' },
   rowTitleUnread: { color: '#EBEBF5' },

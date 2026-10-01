@@ -36,6 +36,8 @@ interface NotificationsContextType {
   refresh: () => Promise<void>;
   markRead: (id: number | string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  /** Put a freshly created card at the top of the feed without a full reload. */
+  prependNotification: (item: AppNotification) => void;
   /** Schedule OS push. Optionally write a feed card (API or AsyncStorage). */
   rememberTask: (task: ReminderTask, opts?: { writeFeed?: boolean }) => Promise<void>;
   forgetTask: (taskId: string) => Promise<void>;
@@ -163,6 +165,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const prependNotification = useCallback((created: AppNotification) => {
+    setItems(prev => byNewest([
+      created,
+      ...prev.filter(item => String(item.id) !== String(created.id)),
+    ]));
+    if (!created.is_read) setUnreadCount(count => count + 1);
+  }, []);
+
   const forgetTask = useCallback(async (taskId: string) => {
     await cancelTaskReminder(taskId);
   }, []);
@@ -177,9 +187,21 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     refresh,
     markRead,
     markAllRead,
+    prependNotification,
     rememberTask,
     forgetTask,
-  }), [items, unreadCount, latest, isLoading, refresh, markRead, markAllRead, rememberTask, forgetTask]);
+  }), [
+    items,
+    unreadCount,
+    latest,
+    isLoading,
+    refresh,
+    markRead,
+    markAllRead,
+    prependNotification,
+    rememberTask,
+    forgetTask,
+  ]);
 
   return (
     <NotificationsContext.Provider value={value}>

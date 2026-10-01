@@ -36,7 +36,7 @@
 frontend/src/
 │
 ├── app/                          # expo-router файловая маршрутизация
-│   ├── _layout.tsx               # ← Корневой layout (AuthProvider + AppLockGate + SyncStatusBanner)
+│   ├── _layout.tsx               # ← Корневой layout (AuthProvider + AppLockGate + SyncStatusBanner). Стек: index, (tabs), auth
 │   ├── index.tsx                 # ← Точка входа: <Redirect href="/(tabs)/chat" />
 │   ├── auth.tsx                  # ← Алиас: re-export из screens/AuthScreen
 │   └── (tabs)/
@@ -46,12 +46,12 @@ frontend/src/
 │       ├── chat.tsx              # ← Вкладка «Чат» (Byte AI)
 │       ├── notes.tsx             # ← Вкладка «Заметки»
 │       └── profile/
-│           ├── _layout.tsx       # ← Stack для профиля (index + auth + facts + sessions + notifications)
+│           ├── _layout.tsx       # ← Stack для профиля (index + auth + facts + sessions + notifications). Нижние табы остаются видимыми
 │           ├── index.tsx         # ← Вкладка «Профиль»
 │           ├── auth.tsx          # ← Экран авторизации внутри вкладки профиля
 │           ├── facts.tsx         # ← Экран «Память ИИ»
 │           ├── sessions.tsx      # ← Экран «Активные сессии»
-│           └── notifications.tsx # ← Экран истории уведомлений
+│           └── notifications.tsx # ← История уведомлений. Колокольчик: navigate('/profile'), затем push('/profile/notifications')
 │
 ├── screens/                      # Логика экранов (импортируются через app/)
 │   ├── AuthScreen.tsx            # Авторизация / Регистрация
@@ -62,7 +62,7 @@ frontend/src/
 │   ├── ProfileScreen.tsx         # Профиль пользователя
 │   ├── FactsScreen.tsx           # Память ИИ (UserFacts)
 │   ├── SessionsScreen.tsx        # Активные устройства / сессии
-│   ├── NotificationsScreen.tsx   # История уведомлений (чипы категорий, группировка по датам)
+│   ├── NotificationsScreen.tsx   # История уведомлений: чипы, группировка по датам, картинка пожелания, кнопка «Сгенерировать ИИ-пуш»
 │   ├── PinLockScreen.tsx         # PIN-экран блокировки
 │   └── index.tsx                 # (barrel-экспорт экранов)
 │
@@ -104,14 +104,14 @@ frontend/src/
 │   └── NotificationsContext.tsx  # Лента уведомлений, unread-count, mark-read, планирование локальных пушей
 │
 ├── api/
-│   ├── config.ts                 # URL бэкенда, порт, hydrate из AsyncStorage
+│   ├── config.ts                 # URL бэкенда, порт, hydrate из AsyncStorage. На Node SSR (`window` нет) чтение IP пропускается, дефолт — localhost
 │   ├── http.ts                   # apiFetch — обёртка fetch с обработкой 401
 │   ├── todosApi.ts               # CRUD запросы к /todos/*
 │   ├── notesApi.ts               # CRUD запросы к /notes
 │   ├── subjectsApi.ts            # CRUD запросы к /subjects
 │   ├── sessionsApi.ts            # Запросы к /auth/sessions
 │   ├── factsApi.ts               # Запросы к /profile/facts
-│   └── notificationsApi.ts      # CRUD запросы к /notifications/*
+│   └── notificationsApi.ts      # CRUD /notifications/*, POST /notifications/trigger-magic, image_url → абсолютный URL
 │
 ├── storage/
 │   ├── chatStorage.ts            # AsyncStorage: кэш чатов (per-user)
@@ -156,7 +156,7 @@ frontend/src/
 | **Авторизация** | `/(tabs)/profile/auth` или `/auth` | `screens/AuthScreen.tsx` | Регистрация (2 шага + код на почту) и вход (с опциональной 2FA). Интегрирован в ProfileScreen для гостевого режима |
 | **Память ИИ** | `/(tabs)/profile/facts` | `screens/FactsScreen.tsx` | Просмотр и удаление фактов, которые ИИ запомнил о студенте. Данные: `GET /profile/facts` |
 | **Активные сессии** | `/(tabs)/profile/sessions` | `screens/SessionsScreen.tsx` | Список всех залогиненных устройств, отзыв сессий. Данные: `GET /auth/sessions` |
-| **Уведомления** | `/(tabs)/profile/notifications` | `screens/NotificationsScreen.tsx` | Полная история уведомлений. Чипы категорий [Все / Задачи / Напоминания / Пожелания], группировка «Сегодня / Вчера / На этой неделе / Ранее». Непрочитанные — синий маркер. Тап → `PATCH /notifications/{id}/read`. Гости: AsyncStorage |
+| **Уведомления** | `/(tabs)/profile/notifications` | `screens/NotificationsScreen.tsx` | Экран внутри стека вкладки «Профиль», нижняя панель табов остаётся. Колокольчик с любой вкладки: `router.navigate('/profile')`, через 50 мс `router.push('/profile/notifications')`. «Назад» — `router.back()` на главный экран кабинета, экран выгружается из стека. Чипы [Все / Задачи / Напоминания / Пожелания], группировка по датам. Утро (`wishes`): ☀️ или ⛱️, если в тексте дождь. Перед сном (`push_slot=evening`): 🌙 или 🐱. Если есть `image_url`, под текстом квадратное фото. Кнопка «Сгенерировать ИИ-пуш ✨» вызывает `POST /notifications/trigger-magic`. Тап по карточке → `PATCH /notifications/{id}/read`. Гости видят ленту из AsyncStorage |
 | **PIN-блокировка** | (модал поверх всего) | `screens/PinLockScreen.tsx` | Показывается `AppLockGate` при холодном старте если PIN установлен |
 
 ---
@@ -298,6 +298,7 @@ Android-канал `byte-reminders` создаётся перед запросо
 | `refresh()` | Перезагрузка ленты (на старте, при фокусе приложения, раз в 60 с) |
 | `markRead(id)` | `PATCH /notifications/{id}/read` или локальная отметка |
 | `markAllRead()` | `POST /notifications/read-all` |
+| `prependNotification(item)` | Вставляет новую карточку в начало ленты без полной перезагрузки (после `trigger-magic`) |
 | `rememberTask(task)` | Планирует OS-пуш за 30 мин + пишет карточку в ленту (на создании) |
 | `forgetTask(taskId)` | `cancelScheduledNotificationAsync` |
 
@@ -315,7 +316,7 @@ Android-канал `byte-reminders` создаётся перед запросо
 | `DevServerModal` | Dev-инструмент (вызывается долгим тапом по вкладке «Чат»): позволяет сменить IP-адрес бэкенда без пересборки |
 | `StatusIndicator` | Бейдж «Офлайн режим» / «Гостевой режим». Проп `embedded` — без absolute-позиции, встраивается в `TopRightChrome`. При online + авторизован — `return null` |
 | `TopRightChrome` | Абсолютный кластер `right: 14, zIndex: 9999`: колокольчик слева, `StatusIndicator` справа. Рендерится в `_layout.tsx` |
-| `NotificationBell` | Иконка колокольчика. Красный бейдж с числом непрочитанных. Тап открывает компактный dropdown: 3 последних уведомления, «Отметить всё», «Посмотреть все уведомления» → `/profile/notifications` |
+| `NotificationBell` | Иконка колокольчика. Красный бейдж с числом непрочитанных. Тап открывает компактный dropdown: 3 последних уведомления, «Отметить всё», «Посмотреть все уведомления» → `navigate('/profile')` и следом `push('/profile/notifications')` |
 | `AppLockGate` | При холодном старте: читает PIN из AsyncStorage, если есть — показывает `PinLockScreen` поверх всего контента |
 | `AppLockSettingsModal` | Настройка PIN в разделе «Профиль» |
 | `PinPad` | Цифровая клавиатура 3×4 для ввода PIN |
