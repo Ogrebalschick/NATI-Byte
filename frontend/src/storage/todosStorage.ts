@@ -11,6 +11,7 @@ export interface TodoTask {
   title: string;
   description: string;
   due_date: string | null;
+  schedule_date: string | null;
   priority: 1 | 2 | 3 | 4;
   is_completed: boolean;
   created_at: string;

@@ -76,6 +76,9 @@ frontend/src/
 │   │   ├── helloByte.tsx         # Приветственный экран Byte
 │   │   ├── error.tsx             # Состояние ошибки в чате
 │   │   └── crisis.tsx            # Кризисная интервенция (особые ситуации)
+│   ├── todos/
+│   │   ├── CalendarView.tsx      # Google Calendar-стиль: 28-дневная лента + почасовая сетка 07–22. Показывает задачи дважды: 🛠️ schedule_date + 🚨 due_date
+│   │   └── CreateTaskModal.tsx   # Модал создания задачи: умный выбор проекта/раздела (чипы + «Новый» → строка на лету), DateTimePicker для due_date и schedule_date
 │   ├── stats/
 │   │   ├── CircularGpa.tsx       # Круговой индикатор GPA
 │   │   ├── CircularPercent.tsx   # Круговой индикатор в %
@@ -135,7 +138,7 @@ frontend/src/
 | **Стартовый редирект** | `/` | `app/index.tsx` | Немедленно редиректит на `/(tabs)/chat` |
 | **Чат (Byte AI)** | `/(tabs)/chat` | `screens/byte.tsx` | Главный чат с ИИ. Использует GigaChat через `POST /ask`. Хранит историю локально + синхронизирует через `POST /auth/chats/save` |
 | **Статистика** | `/(tabs)/statistics` | `screens/StatisticsScreen.tsx` | Отображает успеваемость из ЛК НГТУ (progress, control_weeks), GPA, ручные предметы и их баллы. Данные: `GET /sync/student-data` + `GET /subjects` |
-| **Список дел** | `/(tabs)/todos` | `screens/TodoScreen.tsx` | Todoist-подобный таск-менеджер. Проекты → Разделы → Задачи. Данные: `GET /todos/data` |
+| **Список дел** | `/(tabs)/todos` | `screens/TodoScreen.tsx` | Todoist-подобный таск-менеджер. Два режима: **Список** (проекты → разделы → задачи) и **Календарь** (Google Calendar-стиль). Создание задачи: умный ввод проекта/раздела (строка = создать новый), два DateTimePicker для `due_date` и `schedule_date`. Данные: `GET /todos/data` |
 | **Заметки** | `/(tabs)/notes` | `screens/NotesScreen.tsx` | Markdown-заметки с AI-категоризацией через GigaChat. Данные: `GET /notes` |
 | **Профиль** | `/(tabs)/profile` | `screens/ProfileScreen.tsx` | Настройки аккаунта, 2FA, смена пароля, импорт из ЛК НГТУ, статус синхронизации |
 | **Авторизация** | `/(tabs)/profile/auth` или `/auth` | `screens/AuthScreen.tsx` | Регистрация (2 шага + код на почту) и вход (с опциональной 2FA). Интегрирован в ProfileScreen для гостевого режима |

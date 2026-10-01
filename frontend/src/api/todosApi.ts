@@ -10,6 +10,7 @@ export interface ApiTask {
   title: string;
   description: string;
   due_date: string | null;
+  schedule_date: string | null;
   priority: 1 | 2 | 3 | 4;
   is_completed: boolean;
   created_at: string;
@@ -44,9 +45,12 @@ export interface ApiTodosData {
 export interface TaskCreatePayload {
   title: string;
   description?: string;
-  project_id?: number | null;
-  section_id?: number | null;
+  /** int = существующий проект, string = название нового (создаётся на лету), null = Входящие */
+  project_id?: number | string | null;
+  /** int = существующий раздел, string = название нового (создаётся на лету), null = без раздела */
+  section_id?: number | string | null;
   due_date?: string | null;
+  schedule_date?: string | null;
   priority?: number;
 }
 
@@ -56,6 +60,7 @@ export interface TaskUpdatePayload {
   project_id?: number | null;
   section_id?: number | null;
   due_date?: string | null;
+  schedule_date?: string | null;
   priority?: number;
   is_completed?: boolean;
 }
