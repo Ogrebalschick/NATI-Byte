@@ -623,33 +623,59 @@ export default function TodoScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
 
-      {/* ── Header ───────────────────────────────────────────────────────── */}
+      {/*
+       * ── Header ────────────────────────────────────────────────────────────
+       *
+       * Двухрядная структура намеренно разделяет заголовок и переключатель:
+       *
+       *   Строка 1 (headerTitleRow): "Список дел" — занимает полную ширину.
+       *     StatusIndicator (position: absolute) накрывает пустое пространство
+       *     справа от заголовка — не перекрывает никакие кнопки.
+       *
+       *   Строка 2 (headerControlsRow): переключатель Список / Календарь.
+       *     Находится ниже нижней границы StatusIndicator — полностью свободен.
+       *
+       * paddingTop: 10 даёт дополнительный зазор от статус-бара.
+       */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Список дел</Text>
 
-        {/* Mode toggle */}
-        <View style={styles.modeToggle}>
-          <Pressable
-            onPress={() => setViewMode('list')}
-            style={[styles.modeBtn, viewMode === 'list' && styles.modeBtnActive]}
-          >
-            <Ionicons
-              name={viewMode === 'list' ? 'list' : 'list-outline'}
-              size={16}
-              color={viewMode === 'list' ? '#fff' : TEXT2}
-            />
-          </Pressable>
-          <Pressable
-            onPress={() => setViewMode('calendar')}
-            style={[styles.modeBtn, viewMode === 'calendar' && styles.modeBtnActive]}
-          >
-            <Ionicons
-              name={viewMode === 'calendar' ? 'calendar' : 'calendar-outline'}
-              size={16}
-              color={viewMode === 'calendar' ? '#fff' : TEXT2}
-            />
-          </Pressable>
+        {/* Строка 1: заголовок — полная ширина, StatusIndicator не мешает */}
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>Список дел</Text>
         </View>
+
+        {/* Строка 2: переключатель режимов — ниже StatusIndicator badge */}
+        <View style={styles.headerControlsRow}>
+          <View style={styles.modeToggle}>
+            <Pressable
+              onPress={() => setViewMode('list')}
+              style={[styles.modeBtn, viewMode === 'list' && styles.modeBtnActive]}
+            >
+              <Ionicons
+                name={viewMode === 'list' ? 'list' : 'list-outline'}
+                size={16}
+                color={viewMode === 'list' ? '#fff' : TEXT2}
+              />
+              <Text style={[styles.modeBtnLabel, viewMode === 'list' && styles.modeBtnLabelActive]}>
+                Список
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setViewMode('calendar')}
+              style={[styles.modeBtn, viewMode === 'calendar' && styles.modeBtnActive]}
+            >
+              <Ionicons
+                name={viewMode === 'calendar' ? 'calendar' : 'calendar-outline'}
+                size={16}
+                color={viewMode === 'calendar' ? '#fff' : TEXT2}
+              />
+              <Text style={[styles.modeBtnLabel, viewMode === 'calendar' && styles.modeBtnLabelActive]}>
+                Календарь
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
       </View>
 
       {/* ── Calendar mode ────────────────────────────────────────────────── */}
@@ -770,14 +796,35 @@ const styles = StyleSheet.create({
 
   // ── Header ────────────────────────────────────────────────────────────────
   header: {
+    paddingHorizontal: 20,
+    // paddingTop: 10 — зазор между SafeArea-краем и контентом.
+    // Двухрядная структура гарантирует, что StatusIndicator (position: absolute,
+    // top: insets.top + 12, ~28px высота) не перекрывает кнопки переключателя.
+    paddingTop: 10,
+    paddingBottom: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: BORDER,
+  },
+
+  // Строка 1: заголовок — занимает полную ширину (badge справа не блокирует)
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    // minHeight чуть больше высоты StatusIndicator badge (~28px) + зазор
+    minHeight: 38,
+    marginBottom: 8,
+  },
+  headerTitle: {
+    fontSize: 28, fontWeight: '700', color: TEXT, letterSpacing: 0.2,
+    lineHeight: 34,
+  },
+
+  // Строка 2: переключатель — ниже badge (badge bottom ≈ insets.top + 40)
+  headerControlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
+    justifyContent: 'flex-start',
   },
-  headerTitle: { fontSize: 28, fontWeight: '700', color: TEXT, letterSpacing: 0.2 },
 
   // Mode toggle
   modeToggle: {
@@ -790,12 +837,16 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
   },
   modeBtn: {
-    width: 34, height: 30,
-    borderRadius: 9,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    height: 30,
+    borderRadius: 9,
   },
   modeBtnActive: { backgroundColor: '#0A84FF' },
+  modeBtnLabel: { fontSize: 12, fontWeight: '600', color: TEXT2 },
+  modeBtnLabelActive: { color: '#fff' },
 
   // ── Project chips ─────────────────────────────────────────────────────────
   chipsScroll: { flexGrow: 0, marginTop: 10 },
