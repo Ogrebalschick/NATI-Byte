@@ -184,7 +184,7 @@ class NoteResponse(BaseModel):
     updated_at: datetime
 
 
-# ── AI memory / digital footprint ─────────────────────────────────────────────
+# ── Student facts / digital footprint ─────────────────────────────────────────
 
 class UserFactUpdate(BaseModel):
     fact_text: str

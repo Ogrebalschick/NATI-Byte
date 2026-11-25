@@ -103,3 +103,22 @@ venv/
 __pycache__/
 
 rules.md
+
+# Cursor AI и временные файлы
+Temp/
+.cursor/
+.cursorrules
+*.cursor
+.cursorignore
+
+# AI инструкции и промпты
+*.ai.md
+*prompt*.md
+*instruction*.md
+*ai-guide*.md
+
+# Временные файлы и логи
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

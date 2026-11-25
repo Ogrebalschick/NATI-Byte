@@ -1,4 +1,4 @@
-"""AI parser for NSTU student cabinet pages (ciu.nstu.ru).
+"""Parser for NSTU student cabinet pages (ciu.nstu.ru).
 
 The frontend collects page text and posts it here. GigaChat extracts a
 strict JSON payload which is stored in student_data and, for profile pages,

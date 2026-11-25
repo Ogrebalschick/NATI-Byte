@@ -1,8 +1,7 @@
 // Polyfill for Node's 'punycode' module — required by markdown-it, absent in Metro.
 import 'punycode/';
 
-// Per rules.md §3.1 — Guest Mode Support:
-// The app must boot directly into the tab navigator. Account auth must never
+// Guest mode: the app boots directly into the tab navigator. Account auth must never
 // block initial access. The auth wall lives only inside ProfileScreen.
 // AppLockGate is separate: it covers the UI on a cold start only when a device PIN is set.
 import { useEffect } from 'react';

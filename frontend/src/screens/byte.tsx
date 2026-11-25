@@ -174,7 +174,7 @@ const Byte = () => {
           try {
             knownFacts = mergeFactTexts(knownFacts, factTexts(await fetchFactGroups(token)));
           } catch (err) {
-            console.warn('Failed to load AI memory', err);
+            console.warn('Failed to load saved facts', err);
           }
         }
         setFacts(knownFacts.filter(item => typeof item === 'string'));
@@ -402,7 +402,7 @@ const Byte = () => {
                 if (created.length > 0) setFacts(prev => mergeFactTexts(prev, created));
               })
               .catch(err => {
-                console.warn('Failed to save AI memory', err);
+                console.warn('Failed to save facts', err);
               });
           } else {
             setFacts(prev => mergeFactTexts(prev, incomingFacts));

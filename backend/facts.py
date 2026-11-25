@@ -1,4 +1,4 @@
-"""AI memory about a student. The owner can inspect and delete every fact."""
+"""Stored facts about a student. The owner can inspect and delete every fact."""
 from __future__ import annotations
 
 import re
@@ -209,7 +209,7 @@ def delete_all_facts(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
-    """Erase the entire AI memory of the current user."""
+    """Erase every stored fact of the current user."""
     user = _current_user(token, db)
     try:
         deleted = (

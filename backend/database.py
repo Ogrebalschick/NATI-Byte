@@ -103,7 +103,7 @@ class Note(Base):
 
 
 class UserFact(Base):
-    """One piece of AI memory about the student. The owner can read and delete it."""
+    """One stored fact about the student. The owner can read and delete it."""
     __tablename__ = "user_facts"
 
     id = Column(Integer, primary_key=True, index=True)
